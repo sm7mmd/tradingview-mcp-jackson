@@ -4,3 +4,7 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+.env
+dashboard/mawjah.db
+dashboard/mawjah.db-shm
+dashboard/mawjah.db-wal
