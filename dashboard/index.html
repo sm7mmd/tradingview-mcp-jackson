@@ -6,7 +6,7 @@
 <title>Mawjah — Market Screener</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
 :root {
@@ -25,10 +25,10 @@
   --ease-spring:cubic-bezier(0.32,0.72,0,1);
   --ease-out:cubic-bezier(0.16,1,0.3,1);
   --ease-snappy:cubic-bezier(0.4,0,0.2,1);
-  /* Glow tokens */
-  --glow-green:0 0 20px rgba(0,230,118,.18);
-  --glow-accent:0 0 20px rgba(79,139,255,.2);
-  --glow-red:0 0 20px rgba(255,61,113,.18);
+  /* Subtle inner-border tinted glows — no neon outer blasts */
+  --glow-green:0 2px 12px rgba(0,230,118,.14);
+  --glow-accent:0 2px 12px rgba(61,139,255,.16);
+  --glow-red:0 2px 12px rgba(255,61,113,.14);
   /* Glass surface */
   --glass:rgba(255,255,255,.03);
   --glass-border:rgba(255,255,255,.07);
@@ -38,16 +38,15 @@
 html { font-size:14px; }
 body {
   background:var(--bg); color:var(--text);
-  font-family:"Plus Jakarta Sans","Noto Sans Arabic",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  font-family:"Geist","Noto Sans Arabic",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
   min-height:100vh; line-height:1.5;
   /* Radial mesh gradient — subtle luminous orbs */
   background-image:
-    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(79,139,255,.07) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 85% 20%, rgba(124,77,255,.05) 0%, transparent 55%),
-    radial-gradient(ellipse 50% 60% at 50% 100%, rgba(0,230,118,.04) 0%, transparent 60%);
+    radial-gradient(ellipse 70% 45% at 10% 0%, rgba(61,139,255,.06) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 55% at 50% 105%, rgba(0,230,118,.04) 0%, transparent 60%);
   background-attachment: fixed;
 }
-[dir=rtl] body { font-family:"Noto Sans Arabic","Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
+[dir=rtl] body { font-family:"Noto Sans Arabic","Geist",-apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
 
 /* ── Header — glass floating bar ── */
 header {
@@ -63,10 +62,11 @@ header {
 .logo { display:flex; align-items:center; gap:10px; font-size:15px; font-weight:700; color:#fff; white-space:nowrap; letter-spacing:-.3px; }
 .logo-icon {
   width:30px; height:30px;
-  background:linear-gradient(135deg,var(--accent),#7c4dff);
+  background:var(--accent);
   border-radius:8px;
-  display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;
-  box-shadow:0 0 0 1px rgba(255,255,255,.12) inset, 0 4px 12px rgba(79,139,255,.35);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  box-shadow:0 0 0 1px rgba(255,255,255,.14) inset, 0 4px 10px rgba(61,139,255,.22);
+  color:#fff;
 }
 .header-right { margin-inline-start:auto; display:flex; align-items:center; gap:8px; }
 #clock { font-size:11px; color:var(--text2); font-family:"JetBrains Mono",monospace; min-width:100px; text-align:end; letter-spacing:.02em; }
@@ -82,7 +82,7 @@ header {
   color:var(--text2); cursor:pointer; font-size:12px; font-weight:600;
   padding:5px 11px; border-radius:20px;
   transition:all .25s var(--ease-out); white-space:nowrap;
-  font-family:"Plus Jakarta Sans",sans-serif;
+  font-family:"Geist",sans-serif;
 }
 .lang-btn:hover { color:var(--text); border-color:rgba(79,139,255,.4); background:rgba(79,139,255,.08); }
 
@@ -90,18 +90,18 @@ header {
 .btn {
   display:inline-flex; align-items:center; gap:6px;
   padding:7px 15px; border-radius:8px; border:none; cursor:pointer;
-  font-size:12px; font-weight:600; font-family:"Plus Jakarta Sans",sans-serif;
+  font-size:12px; font-weight:600; font-family:"Geist",sans-serif;
   transition:all .25s var(--ease-out); white-space:nowrap;
   position:relative; overflow:hidden;
 }
 .btn::before { content:''; position:absolute; inset:0; background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,transparent 100%); pointer-events:none; }
 .btn:active { transform:scale(.97); transition-duration:.1s; }
 .btn-primary {
-  background:linear-gradient(135deg,var(--accent),#6c74ff);
+  background:var(--accent);
   color:#fff;
-  box-shadow:0 0 0 1px rgba(255,255,255,.1) inset, var(--glow-accent);
+  box-shadow:0 0 0 1px rgba(255,255,255,.12) inset, var(--glow-accent);
 }
-.btn-primary:hover { background:linear-gradient(135deg,#6c94ff,#8a74ff); box-shadow:0 0 0 1px rgba(255,255,255,.15) inset, 0 0 28px rgba(79,139,255,.3); }
+.btn-primary:hover { background:#5a97ff; box-shadow:0 0 0 1px rgba(255,255,255,.16) inset, 0 4px 16px rgba(61,139,255,.22); }
 .btn-primary:disabled,.btn-secondary:disabled,.btn-quick:disabled { opacity:.35; cursor:not-allowed; transform:none !important; }
 .btn-quick {
   background:rgba(255,215,64,.08); color:var(--yellow);
@@ -178,7 +178,7 @@ main { padding:20px 24px; max-width:1440px; margin:0 auto; }
 .tab {
   padding:5px 15px; border-radius:7px; border:none;
   background:transparent; color:var(--text2); cursor:pointer;
-  font-size:13px; font-weight:500; font-family:"Plus Jakarta Sans",sans-serif;
+  font-size:13px; font-weight:500; font-family:"Geist",sans-serif;
   transition:all .2s var(--ease-out);
   position:relative;
 }
@@ -207,7 +207,7 @@ main { padding:20px 24px; max-width:1440px; margin:0 auto; }
   padding:4px 10px; border-radius:5px; border:none;
   background:transparent; color:var(--text2); cursor:pointer;
   font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.4px;
-  transition:all .18s var(--ease-out); font-family:"Plus Jakarta Sans",sans-serif;
+  transition:all .18s var(--ease-out); font-family:"Geist",sans-serif;
 }
 .filter-btn.active { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.4); }
 .filter-btn:hover:not(.active) { color:var(--text); }
@@ -228,7 +228,7 @@ thead th {
   font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.8px;
   color:var(--text3); border-bottom:1px solid var(--border);
   cursor:pointer; user-select:none; white-space:nowrap;
-  font-family:"Plus Jakarta Sans",sans-serif;
+  font-family:"Geist",sans-serif;
   transition:color .15s;
 }
 thead th:hover { color:var(--text2); }
@@ -242,7 +242,7 @@ td { padding:9px 12px; vertical-align:middle; }
 tr.selected-row { background:var(--blue-dim) !important; }
 .td-ticker { font-family:"JetBrains Mono",monospace; font-weight:700; color:var(--accent); font-size:12px; letter-spacing:.02em; }
 .td-name { color:var(--text); font-weight:500; }
-.ar-name { display:block; font-size:10px; color:var(--text3); font-family:'Plus Jakarta Sans',sans-serif; line-height:1.2; margin-top:1px; }
+.ar-name { display:block; font-size:10px; color:var(--text3); font-family:'Geist',sans-serif; line-height:1.2; margin-top:1px; }
 .td-price { font-family:"JetBrains Mono",monospace; font-weight:600; text-align:end; }
 .rsi-pill { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:700; font-family:"JetBrains Mono",monospace; letter-spacing:.02em; }
 .rsi-bull { background:var(--green-dim); color:var(--green); }
@@ -366,7 +366,7 @@ tr.selected-row { background:var(--blue-dim) !important; }
 .ai-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:12px;color:var(--text2);line-height:1.7;}
 .ai-card p{margin-bottom:8px;}.ai-card p:last-child{margin-bottom:0;}
 .ai-card strong{color:var(--text);}
-.ask-claude-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:6px;background:linear-gradient(135deg,var(--accent),#7c4dff);color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:opacity .15s;width:100%;}
+.ask-claude-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:opacity .15s;width:100%;box-shadow:0 0 0 1px rgba(255,255,255,.1) inset;}
 .ask-claude-btn:hover{opacity:.85;}.ask-claude-btn:disabled{opacity:.5;cursor:not-allowed;}
 /* ── Backtest ── */
 .bt-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;}
@@ -1106,12 +1106,194 @@ td[title]{cursor:help;}
 @media(max-width:900px){ .summary-grid{grid-template-columns:repeat(2,1fr);} .criteria-grid{grid-template-columns:1fr;} .scoring-rules{grid-template-columns:repeat(2,1fr);} td.hm{display:none;} }
 @media(max-width:768px){ #detail-drawer{width:100%;top:0;inset-inline-end:0;border-inline-start:none;} #detail-overlay{background:rgba(0,0,0,.7);} .crit-table th:nth-child(5),.crit-table td:nth-child(5){display:none;} }
 @media(max-width:600px){ header{padding:0 10px;} main{padding:10px;} .summary-grid{gap:8px;} }
+
+/* ── Skeleton loaders ─────────────────────────────────────────────────────── */
+@keyframes sk-shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--bg2) 25%, rgba(255,255,255,.04) 50%, var(--bg2) 75%);
+  background-size: 1200px 100%;
+  animation: sk-shimmer 1.6s ease-in-out infinite;
+  border-radius: 4px;
+}
+.sk-row { height: 14px; width: 100%; }
+.sk-row-sm { height: 10px; width: 60%; }
+.sk-badge { height: 20px; width: 64px; border-radius: 20px; }
+.sk-val { height: 28px; width: 48px; border-radius: 5px; }
+.skeleton-tr td { padding: 10px 12px; }
+
+/* ── Auth gate overlay ───────────────────────────────────────────────────── */
+#mwj-gate {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: stretch;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 50% at 10% 10%, rgba(61,139,255,.07) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 60% at 80% 90%, rgba(0,230,118,.04) 0%, transparent 60%);
+  transition: opacity .38s var(--ease-out), transform .38s var(--ease-out);
+  will-change: transform, opacity;
+}
+#mwj-gate.gate-dismiss { opacity: 0; transform: translateY(-10px); pointer-events: none; }
+#mwj-gate.gate-gone   { display: none; }
+
+.gate-brand {
+  flex: 0 0 58%; display: flex; flex-direction: column;
+  justify-content: center; align-items: flex-start;
+  padding: 10vh 8vw 10vh 10vw; position: relative; overflow: hidden;
+}
+.gate-brand::after {
+  content: ''; position: absolute; top: 10%; bottom: 10%; right: 0; width: 1px;
+  background: linear-gradient(180deg, transparent 0%, var(--glass-border) 25%, var(--glass-border) 75%, transparent 100%);
+}
+.gate-wave-mark {
+  width: 46px; height: 46px; background: var(--accent); border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 30px; flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.14) inset, 0 4px 14px rgba(61,139,255,.2);
+  color: #fff;
+}
+.gate-brand-name {
+  font-size: clamp(48px, 6vw, 76px); font-weight: 800;
+  letter-spacing: -3px; line-height: 1; color: var(--text); margin-bottom: 8px;
+}
+.gate-brand-arabic {
+  font-size: 26px; font-weight: 600; color: var(--text2);
+  margin-bottom: 18px; font-family: "Noto Sans Arabic", sans-serif;
+}
+.gate-brand-desc {
+  font-size: 13px; color: var(--text2); line-height: 1.65;
+  max-width: 360px; margin-bottom: 52px;
+}
+.gate-markets { display: flex; flex-direction: column; gap: 10px; }
+.gate-mkt-row { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text3); }
+.gate-mkt-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.gate-mkt-dot.bull { background: var(--green); }
+.gate-mkt-dot.bear { background: var(--red); }
+.gate-mkt-dot.idle { background: var(--text3); }
+.gate-mkt-sym { font-family: "JetBrains Mono",monospace; font-weight: 700; font-size: 11px; color: var(--text2); min-width: 54px; }
+.gate-mkt-chg { font-family: "JetBrains Mono",monospace; font-size: 11px; font-weight: 700; }
+.gate-mkt-chg.up { color: var(--green); } .gate-mkt-chg.dn { color: var(--red); }
+
+.gate-form-side {
+  flex: 1; display: flex; align-items: center;
+  justify-content: center; padding: 10vh 8vw;
+}
+.gate-form-inner { width: 100%; max-width: 340px; }
+.gate-eyebrow {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--text3); margin-bottom: 14px;
+}
+.gate-form-heading {
+  font-size: 22px; font-weight: 700; letter-spacing: -.4px;
+  color: var(--text); margin-bottom: 6px;
+}
+.gate-form-sub {
+  font-size: 12px; color: var(--text2); line-height: 1.65; margin-bottom: 26px;
+}
+.gate-form-sub code {
+  font-family: "JetBrains Mono",monospace; font-size: 11px;
+  color: var(--accent); background: var(--blue-dim);
+  padding: 1px 5px; border-radius: 3px;
+}
+.gate-input-group { position: relative; margin-bottom: 8px; }
+.gate-input {
+  width: 100%; height: 44px; background: var(--bg2);
+  border: 1px solid var(--glass-border); border-radius: 8px;
+  padding: 0 42px 0 14px;
+  font-family: "JetBrains Mono",monospace; font-size: 12px;
+  color: var(--text); outline: none; letter-spacing: .04em;
+  transition: border-color .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+.gate-input::placeholder { color: var(--text3); letter-spacing: 0; font-family: "Geist",sans-serif; }
+.gate-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(61,139,255,.1); }
+.gate-input.gate-input-err { border-color: var(--red); box-shadow: 0 0 0 3px rgba(255,61,113,.1); }
+@keyframes gate-shake {
+  0%,100%{transform:translateX(0)} 20%{transform:translateX(-5px)}
+  40%{transform:translateX(5px)} 60%{transform:translateX(-3px)} 80%{transform:translateX(3px)}
+}
+.gate-input.gate-shake { animation: gate-shake .38s var(--ease-snappy); }
+.gate-eye-btn {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--text3);
+  padding: 0; transition: color .15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.gate-eye-btn:hover { color: var(--text2); }
+.gate-error { font-size: 11px; color: var(--red); margin-bottom: 14px; min-height: 15px; display: block; line-height: 1.4; }
+.gate-submit {
+  width: 100%; height: 44px; background: var(--accent);
+  border: none; border-radius: 8px; color: #fff;
+  font-size: 13px; font-weight: 600; letter-spacing: -.1px;
+  cursor: pointer; position: relative; overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.1) inset;
+  transition: opacity .2s, transform .1s var(--ease-out);
+  font-family: "Geist",sans-serif;
+}
+.gate-submit::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,.06) 0%, transparent 55%);
+  pointer-events: none;
+}
+.gate-submit:hover { opacity: .88; }
+.gate-submit:active { transform: scale(.98); }
+.gate-submit:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+@media (max-width: 720px) {
+  .gate-brand { display: none; }
+  #mwj-gate { justify-content: center; }
+  .gate-form-side { padding: 0 28px; }
+}
 </style>
 </head>
 <body>
 
+<!-- ── Auth gate — shown by default, hidden if key is already stored ── -->
+<div id="mwj-gate" role="dialog" aria-modal="true" aria-label="Dashboard access">
+  <div class="gate-brand">
+    <div class="gate-wave-mark">
+      <svg viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="20" height="14">
+        <path d="M1 7 C3.5 2 5 2 7.5 7 C10 12 11.5 12 14 7 C16.5 2 18 2 19 7"/>
+      </svg>
+    </div>
+    <div class="gate-brand-name">Mawjah</div>
+    <div class="gate-brand-arabic">موجة</div>
+    <p class="gate-brand-desc">Multi-market screener for US Equity, Tadawul, BTC, and XRP. Powered by live TradingView data.</p>
+    <div class="gate-markets">
+      <div class="gate-mkt-row"><span class="gate-mkt-dot bull"></span><span class="gate-mkt-sym">TASI</span><span class="gate-mkt-chg up">+0.74%</span><span>Saudi Exchange</span></div>
+      <div class="gate-mkt-row"><span class="gate-mkt-dot bull"></span><span class="gate-mkt-sym">BTCUSD</span><span class="gate-mkt-chg up">+2.3%</span><span>Crypto</span></div>
+      <div class="gate-mkt-row"><span class="gate-mkt-dot idle"></span><span class="gate-mkt-sym">SPY</span><span class="gate-mkt-chg dn">-0.1%</span><span>US Equity</span></div>
+    </div>
+  </div>
+  <div class="gate-form-side">
+    <div class="gate-form-inner">
+      <p class="gate-eyebrow">Mawjah Terminal</p>
+      <h2 class="gate-form-heading">Enter your API key</h2>
+      <p class="gate-form-sub">Set via <code>DASHBOARD_API_KEY</code> in your <code>.env</code> file.</p>
+      <div class="gate-input-group">
+        <input id="mwj-key-input" class="gate-input" type="password"
+               placeholder="Paste your key here" autocomplete="off" spellcheck="false">
+        <button class="gate-eye-btn" id="mwj-eye-btn" type="button" title="Toggle visibility">
+          <svg id="mwj-eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+      <span id="mwj-gate-error" class="gate-error" aria-live="polite"></span>
+      <button id="mwj-submit-btn" class="gate-submit" type="button">Continue</button>
+    </div>
+  </div>
+</div>
+
 <header>
-  <div class="logo"><div class="logo-icon">📈</div><span data-i18n="title">TASI Dashboard</span></div>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="11">
+        <path d="M1 7 C3.5 2 5 2 7.5 7 C10 12 11.5 12 14 7 C16.5 2 18 2 19 7"/>
+      </svg>
+    </div>
+    <span data-i18n="title">Mawjah</span>
+  </div>
   <div class="header-right">
     <div id="clock"></div>
     <button class="ccy-btn" id="ccy-btn" onclick="toggleCurrency()">$ USD</button>
@@ -1642,36 +1824,123 @@ td[title]{cursor:help;}
 </div>
 
 <script>
-// ── Auth: inject Bearer token on all /api/ fetch calls ───────────────────────
-(function() {
+// ── Auth gate manager ────────────────────────────────────────────────────────
+const mwjAuth = (function() {
   const STORAGE_KEY = 'mawjah_api_key';
-  function getKey() { return localStorage.getItem(STORAGE_KEY) || ''; }
-  function saveKey(k) { localStorage.setItem(STORAGE_KEY, k.trim()); }
-  if (!getKey()) {
-    const k = window.prompt('Enter your Mawjah dashboard API key:');
-    if (k) saveKey(k);
+  const _rawFetch   = window.fetch.bind(window);
+
+  function getKey()    { return localStorage.getItem(STORAGE_KEY) || ''; }
+  function saveKey(k)  { localStorage.setItem(STORAGE_KEY, k.trim()); }
+  function clearKey()  { localStorage.removeItem(STORAGE_KEY); }
+
+  const gate    = document.getElementById('mwj-gate');
+  const input   = document.getElementById('mwj-key-input');
+  const errEl   = document.getElementById('mwj-gate-error');
+  const btn     = document.getElementById('mwj-submit-btn');
+  const eyeBtn  = document.getElementById('mwj-eye-btn');
+  const eyeIcon = document.getElementById('mwj-eye-icon');
+
+  const EYE_OPEN   = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const EYE_CLOSED = '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+
+  function showGate(msg) {
+    if (!gate) return;
+    gate.classList.remove('gate-dismiss', 'gate-gone');
+    if (msg && errEl) errEl.textContent = msg;
+    setTimeout(() => input && input.focus(), 80);
   }
-  const _fetch = window.fetch.bind(window);
-  window.fetch = function(input, init) {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
+
+  function dismissGate() {
+    if (!gate) return;
+    gate.classList.add('gate-dismiss');
+    gate.addEventListener('transitionend', () => gate.classList.add('gate-gone'), { once: true });
+  }
+
+  async function validateKey(key) {
+    try {
+      const r = await _rawFetch('/api/status', { headers: { 'Authorization': 'Bearer ' + key } });
+      return r.status !== 401;
+    } catch { return true; }
+  }
+
+  function setInputError(show) {
+    if (!input) return;
+    input.classList.toggle('gate-input-err', show);
+    if (show) {
+      input.classList.add('gate-shake');
+      input.addEventListener('animationend', () => input.classList.remove('gate-shake'), { once: true });
+    }
+  }
+
+  async function submit() {
+    if (!input) return;
+    const key = input.value.trim();
+    if (!key) {
+      if (errEl) errEl.textContent = 'Paste your API key to continue.';
+      setInputError(true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    if (errEl) errEl.textContent = '';
+    setInputError(false);
+
+    const ok = await validateKey(key);
+    btn.disabled = false;
+    btn.textContent = 'Continue';
+
+    if (ok) {
+      saveKey(key);
+      dismissGate();
+    } else {
+      if (errEl) errEl.textContent = 'Incorrect key — check DASHBOARD_API_KEY in your .env file.';
+      setInputError(true);
+    }
+  }
+
+  function toggleVis() {
+    if (!input || !eyeIcon) return;
+    const isHidden = input.type === 'password';
+    input.type = isHidden ? 'text' : 'password';
+    eyeIcon.innerHTML = isHidden ? EYE_CLOSED : EYE_OPEN;
+  }
+
+  // Wire events
+  if (input) {
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    input.addEventListener('input', () => { setInputError(false); if (errEl) errEl.textContent = ''; });
+  }
+  if (btn)    btn.addEventListener('click', submit);
+  if (eyeBtn) eyeBtn.addEventListener('click', toggleVis);
+
+  // Initial state
+  const stored = getKey();
+  if (stored) {
+    if (gate) gate.classList.add('gate-gone');
+    validateKey(stored).then(ok => {
+      if (!ok) { clearKey(); showGate('Your API key has changed. Enter the updated key.'); }
+    });
+  }
+  // No stored key → gate stays visible (CSS default: display:flex)
+
+  // Patch window.fetch — injects Bearer on all /api/ calls
+  window.fetch = function(resource, init) {
+    const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
     if (url.startsWith('/api/')) {
       const key = getKey();
       init = Object.assign({}, init);
       init.headers = Object.assign({ 'Authorization': 'Bearer ' + key }, init.headers || {});
     }
-    return _fetch(input, init).then(function(res) {
+    return _rawFetch(resource, init).then(function(res) {
       if (res.status === 401 && url.startsWith('/api/')) {
-        const k = window.prompt('API key rejected. Enter correct Mawjah API key:');
-        if (k) {
-          saveKey(k);
-          const retryInit = Object.assign({}, init);
-          retryInit.headers = Object.assign({}, init.headers, { 'Authorization': 'Bearer ' + k.trim() });
-          return _fetch(input, retryInit);
-        }
+        clearKey();
+        showGate('Session expired — enter your API key to continue.');
       }
       return res;
     });
   };
+
+  return { submit, toggleVis, showGate, dismissGate };
 })();
 </script>
 
