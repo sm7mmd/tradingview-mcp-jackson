@@ -805,19 +805,22 @@ export const goalsProfile = {
 // ── Accuracy lab ──────────────────────────────────────────────────────────────
 export const accuracyLab = {
   log({ sym, name, price_entry, price_stop, price_t1, price_t2, bias, score, max_score,
-        composite, scan_mode, style_tags, market, sector, hurst, atr_rank, rsi_entry, vol_ratio_entry }) {
+        composite, scan_mode, style_tags, market, sector, hurst, atr_rank, rsi_entry,
+        vol_ratio_entry, regime, market_index }) {
     const logged_at = new Date().toISOString().split('T')[0];
-    // Prevent duplicate for same sym on same day
+    // Prevent duplicate for same sym on same day with same bias direction
     const exists = db.prepare('SELECT id FROM accuracy_signals WHERE sym=? AND logged_at=? AND outcome IS NULL').get(sym, logged_at);
     if (exists) return exists.id;
     const result = db.prepare(`
       INSERT INTO accuracy_signals
       (sym,name,logged_at,price_entry,price_stop,price_t1,price_t2,bias,score,max_score,
-       composite,scan_mode,style_tags,market,sector,hurst,atr_rank,rsi_entry,vol_ratio_entry)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       composite,scan_mode,style_tags,market,sector,hurst,atr_rank,rsi_entry,vol_ratio_entry,
+       regime,market_index)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(sym, name||sym, logged_at, price_entry, price_stop, price_t1, price_t2, bias, score,
            max_score, composite, scan_mode, JSON.stringify(style_tags||[]), market||null, sector||null,
-           hurst||null, atr_rank||null, rsi_entry||null, vol_ratio_entry||null);
+           hurst||null, atr_rank||null, rsi_entry||null, vol_ratio_entry||null,
+           regime||null, market_index||null);
     return result.lastInsertRowid;
   },
 
