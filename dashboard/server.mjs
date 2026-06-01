@@ -560,7 +560,7 @@ function updateScoreHistory(results) {
   });
 }
 
-function autoLogAccuracySignals(results, marketKey) {
+function autoLogAccuracySignals(results) {
   // After each scan, log STRONG BUY/SELL signals (score ≥7) for accuracy tracking.
   // regime and market_index are sourced from the scan result (per-market, already computed).
   // Label is resolved to EXIT/EXIT NOW/SKIP/AVOID based on regime + position holding.
