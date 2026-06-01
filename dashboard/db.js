@@ -941,7 +941,7 @@ export const accuracyLab = {
 
   clearAll() {
     const n = db.prepare('SELECT COUNT(*) as n FROM accuracy_signals').get().n;
-    db.exec('DELETE FROM accuracy_signals');
+    db.prepare('DELETE FROM accuracy_signals').run();
     return n;
   },
 
