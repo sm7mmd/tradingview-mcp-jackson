@@ -24,9 +24,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH   = join(__dirname, 'mawjah.db');
 
-// Suppress the experimental warning after first load
-process.removeAllListeners('warning');
-process.on('warning', w => { if (!w.message.includes('SQLite')) console.warn(w.message); });
+// Suppress only the SQLite experimental warning — leave all other warnings intact
+process.on('warning', w => { if (w.name === 'ExperimentalWarning' && w.message.includes('SQLite')) return; console.warn(w.message); });
 
 export const db = new DatabaseSync(DB_PATH);
 
@@ -86,6 +85,22 @@ db.exec(`
     cash_after REAL
   );
 
+  CREATE TABLE IF NOT EXISTS opportunity_signals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym          TEXT NOT NULL,
+    name         TEXT,
+    signal_type  TEXT NOT NULL,
+    conviction   REAL DEFAULT 0,
+    detected_at  TEXT NOT NULL,
+    refreshed_at TEXT,
+    scan_ts      TEXT,
+    payload      TEXT,
+    status       TEXT DEFAULT 'active',
+    expires_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_oppsig_active ON opportunity_signals(status, conviction DESC);
+  CREATE INDEX IF NOT EXISTS idx_oppsig_sym    ON opportunity_signals(sym, signal_type);
+
   CREATE TABLE IF NOT EXISTS insider_buys (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     sym     TEXT,
@@ -97,7 +112,8 @@ db.exec(`
     value   REAL,
     date    TEXT,
     notes   TEXT,
-    added   TEXT
+    added   TEXT,
+    source  TEXT DEFAULT 'manual'
   );
 
   CREATE TABLE IF NOT EXISTS block_deal_log (
@@ -112,6 +128,79 @@ db.exec(`
     key   TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS goals_profile (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS accuracy_signals (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym              TEXT NOT NULL,
+    name             TEXT,
+    logged_at        TEXT NOT NULL,
+    price_entry      REAL NOT NULL,
+    price_stop       REAL,
+    price_t1         REAL,
+    price_t2         REAL,
+    bias             TEXT,
+    score            INTEGER,
+    max_score        INTEGER,
+    composite        INTEGER,
+    scan_mode        TEXT,
+    style_tags       TEXT,
+    market           TEXT,
+    sector           TEXT,
+    hurst            REAL,
+    atr_rank         INTEGER,
+    rsi_entry        REAL,
+    vol_ratio_entry  REAL,
+    outcome          TEXT,
+    price_outcome    REAL,
+    outcome_at       TEXT,
+    days_to_outcome  INTEGER,
+    r_multiple       REAL,
+    notes            TEXT,
+    regime           TEXT,
+    market_index     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_acc_sym  ON accuracy_signals(sym, outcome);
+  CREATE INDEX IF NOT EXISTS idx_acc_date ON accuracy_signals(logged_at DESC);
+
+  CREATE TABLE IF NOT EXISTS cma_filings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym           TEXT NOT NULL,          -- TADAWUL:XXXX
+    company       TEXT,                   -- English company name
+    company_ar    TEXT,                   -- Arabic company name
+    institution   TEXT,                   -- Shareholder/institution name (Arabic)
+    institution_en TEXT,                  -- Mapped English name if known
+    prev_pct      REAL,                   -- Previous stake %
+    new_pct       REAL,                   -- New stake % after transaction
+    direction     TEXT NOT NULL,          -- 'buy' | 'sell' | 'unknown'
+    shares_delta  INTEGER,                -- Change in number of shares (positive = buy)
+    filing_date   TEXT NOT NULL,          -- YYYY-MM-DD
+    source        TEXT DEFAULT 'manual',  -- 'argaam' | 'mubasher' | 'manual' | 'tadawul'
+    source_url    TEXT,
+    raw_text      TEXT,                   -- Original Arabic text snippet
+    verified      INTEGER DEFAULT 0,      -- 1 = CMA-confirmed, 0 = inferred
+    created_at    TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS cma_sym_date ON cma_filings (sym, filing_date);
+
+  CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT UNIQUE,
+    username      TEXT UNIQUE,
+    password_hash TEXT,
+    display_name  TEXT,
+    avatar_url    TEXT,
+    provider      TEXT DEFAULT 'local',
+    provider_id   TEXT,
+    created_at    TEXT DEFAULT (datetime('now')),
+    last_login    TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider ON users(provider, provider_id)
+    WHERE provider_id IS NOT NULL;
 `);
 
 // ── One-time migration from existing JSON files ───────────────────────────────
@@ -310,7 +399,9 @@ export const virtualPortfolio = {
 
   buy({ sym, name, shares, price }) {
     const cash = getVirtualMeta('cash', 100000);
-    const cost = shares * price;
+    // TASI round-trip cost: Tadawul 0.12% + Edaa 0.04% + broker ~0.15% = ~0.31% one-way
+    const commRate = sym?.startsWith('TADAWUL:') ? 0.0031 : 0.001;
+    const cost = shares * price * (1 + commRate);
     if (cost > cash) return { error: 'Insufficient virtual cash' };
     const newCash = +(cash - cost).toFixed(4);
     setVirtualMeta('cash', newCash);
@@ -335,7 +426,9 @@ export const virtualPortfolio = {
     if (shares > pos.shares) return { error: `Only ${pos.shares} shares held` };
     const newShares = pos.shares - shares;
     const cash = getVirtualMeta('cash', 0);
-    const newCash = +(cash + shares * price).toFixed(4);
+    const commRate = sym?.startsWith('TADAWUL:') ? 0.0031 : 0.001;
+    const proceeds = shares * price * (1 - commRate);
+    const newCash = +(cash + proceeds).toFixed(4);
     setVirtualMeta('cash', newCash);
     if (newShares <= 0) {
       db.prepare('DELETE FROM virtual_positions WHERE sym=?').run(sym);
@@ -343,7 +436,7 @@ export const virtualPortfolio = {
       db.prepare('UPDATE virtual_positions SET shares=? WHERE sym=?').run(newShares, sym);
     }
     db.prepare('INSERT INTO virtual_trades (sym,name,action,shares,price,date,cash_after) VALUES (?,?,?,?,?,?,?)')
-      .run(sym, pos.name, 'sell', shares, +price.toFixed(4), new Date().toISOString().split('T')[0], newCash);
+      .run(sym, pos.name, 'sell', shares, +price.toFixed(4), new Date().toISOString().split('T')[0], +(cash + proceeds).toFixed(4));
     return { ok: true };
   },
 
@@ -357,31 +450,42 @@ export const virtualPortfolio = {
   },
 };
 
+// Migrate: add source column to existing insider_buys tables
+try { db.exec("ALTER TABLE insider_buys ADD COLUMN source TEXT DEFAULT 'manual'"); } catch(_) {}
+
 // ── Insider buys helpers ──────────────────────────────────────────────────────
 export const insiderBuys = {
   getAll() {
-    return db.prepare('SELECT * FROM insider_buys ORDER BY added DESC').all();
+    return db.prepare('SELECT * FROM insider_buys ORDER BY date DESC, added DESC').all();
   },
   add(buy) {
-    db.prepare(`INSERT INTO insider_buys (sym,name,person,role,shares,price,value,date,notes,added)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    db.prepare(`INSERT INTO insider_buys (sym,name,person,role,shares,price,value,date,notes,added,source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .run(buy.sym, buy.name ?? '', buy.person ?? '', buy.role ?? '',
            buy.shares ?? 0, buy.price ?? 0, buy.value ?? 0,
-           buy.date, buy.notes ?? '', buy.added ?? new Date().toISOString());
+           buy.date, buy.notes ?? '', buy.added ?? new Date().toISOString(),
+           buy.source ?? 'manual');
+  },
+  exists(sym, person, date) {
+    return !!db.prepare('SELECT 1 FROM insider_buys WHERE sym=? AND person=? AND date=?')
+      .get(sym, person ?? '', date);
   },
   delete(sym, date) {
-    db.prepare('DELETE FROM insider_buys WHERE sym LIKE ? AND date=?')
-      .run(`%${sym}`, date);
+    db.prepare('DELETE FROM insider_buys WHERE sym=? AND date=?').run(sym, date);
+  },
+  deleteAuto() {
+    db.prepare("DELETE FROM insider_buys WHERE source != 'manual'").run();
   },
   syncAll(arr) {
     db.exec('BEGIN');
     db.prepare('DELETE FROM insider_buys').run();
-    const ins = db.prepare(`INSERT INTO insider_buys (sym,name,person,role,shares,price,value,date,notes,added)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`);
+    const ins = db.prepare(`INSERT INTO insider_buys (sym,name,person,role,shares,price,value,date,notes,added,source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
     for (const b of (arr || [])) {
       ins.run(b.sym, b.name ?? '', b.person ?? '', b.role ?? '',
               b.shares ?? 0, b.price ?? 0, b.value ?? 0,
-              b.date, b.notes ?? '', b.added ?? new Date().toISOString());
+              b.date, b.notes ?? '', b.added ?? new Date().toISOString(),
+              b.source ?? 'manual');
     }
     db.exec('COMMIT');
   },
@@ -398,6 +502,16 @@ export const blockDeals = {
     }
     return freq;
   },
+  recentForSym(sym, days = 15) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return db.prepare('SELECT date, deals FROM block_deal_log WHERE sym=? AND date>=? ORDER BY date DESC')
+      .all(sym, cutoff).map(r => { try { return { date: r.date, ...JSON.parse(r.deals) }; } catch { return { date: r.date }; } });
+  },
+  recentAll(days = 15) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return db.prepare('SELECT sym, date, deals FROM block_deal_log WHERE date>=? ORDER BY date DESC')
+      .all(cutoff).map(r => { try { return { sym: r.sym, date: r.date, ...JSON.parse(r.deals) }; } catch { return { sym: r.sym, date: r.date }; } });
+  },
   appendDeals(deals, dateStr) {
     const ins = db.prepare('INSERT INTO block_deal_log (sym,date,source,deals) VALUES (?,?,?,?)');
     db.exec('BEGIN');
@@ -413,6 +527,511 @@ export const blockDeals = {
   setLastDeals(data, date) {
     db.prepare("INSERT OR REPLACE INTO meta (key,value) VALUES ('last_block_deals',?)")
       .run(JSON.stringify({ data, date }));
+  },
+};
+
+// ── CMA Filings ───────────────────────────────────────────────────────────────
+export const cmaFilings = {
+  insert(f) {
+    return db.prepare(`
+      INSERT INTO cma_filings
+        (sym, company, company_ar, institution, institution_en, prev_pct, new_pct,
+         direction, shares_delta, filing_date, source, source_url, raw_text, verified)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      f.sym, f.company||null, f.company_ar||null,
+      f.institution||null, f.institution_en||null,
+      f.prev_pct??null, f.new_pct??null,
+      f.direction||'unknown', f.shares_delta??null,
+      f.filing_date, f.source||'manual',
+      f.source_url||null, f.raw_text||null, f.verified?1:0
+    );
+  },
+
+  // Find filings for a sym, optionally within ±days of a reference date
+  forSym(sym, refDate = null, days = 5) {
+    if (refDate) {
+      return db.prepare(`
+        SELECT * FROM cma_filings
+        WHERE sym = ?
+          AND ABS(julianday(filing_date) - julianday(?)) <= ?
+        ORDER BY filing_date DESC
+      `).all(sym, refDate, days);
+    }
+    return db.prepare(
+      'SELECT * FROM cma_filings WHERE sym = ? ORDER BY filing_date DESC LIMIT 20'
+    ).all(sym);
+  },
+
+  // Recent filings across all stocks (for the monitor panel)
+  recent(limit = 50) {
+    return db.prepare(
+      'SELECT * FROM cma_filings ORDER BY filing_date DESC, created_at DESC LIMIT ?'
+    ).all(limit);
+  },
+
+  // Delete a filing by id
+  delete(id) {
+    return db.prepare('DELETE FROM cma_filings WHERE id = ?').run(id);
+  },
+
+  // Duplicate guard: same sym + institution + filing_date
+  exists(sym, institution, filing_date) {
+    return !!db.prepare(
+      'SELECT 1 FROM cma_filings WHERE sym=? AND institution=? AND filing_date=? LIMIT 1'
+    ).get(sym, institution, filing_date);
+  },
+
+  // Stats for a sym: how many buy/sell filings in last N days
+  summary(sym, days = 30) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return db.prepare(`
+      SELECT direction, COUNT(*) as count, SUM(ABS(shares_delta)) as total_shares
+      FROM cma_filings
+      WHERE sym = ? AND filing_date >= ?
+      GROUP BY direction
+    `).all(sym, cutoff);
+  },
+};
+
+// ── Opportunity Signals ───────────────────────────────────────────────────────
+try { db.exec("ALTER TABLE opportunity_signals ADD COLUMN refreshed_at TEXT"); } catch(_) {}
+try { db.exec("ALTER TABLE opportunity_signals ADD COLUMN discovery_price REAL"); } catch(_) {}
+
+export const oppSignals = {
+  upsert(sym, signalType, payload, scanTs) {
+    const now = new Date().toISOString();
+    const existing = db.prepare(
+      "SELECT id, discovery_price FROM opportunity_signals WHERE sym=? AND signal_type=? AND status='active' ORDER BY detected_at DESC LIMIT 1"
+    ).get(sym, signalType);
+    if (existing) {
+      db.prepare("UPDATE opportunity_signals SET conviction=?,refreshed_at=?,scan_ts=?,payload=?,expires_at=? WHERE id=?")
+        .run(payload.conviction ?? 0, now, scanTs ?? null, JSON.stringify(payload), payload.expires_at ?? null, existing.id);
+    } else {
+      db.prepare(`INSERT INTO opportunity_signals (sym,name,signal_type,conviction,detected_at,refreshed_at,scan_ts,payload,status,expires_at,discovery_price)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(sym, payload.name ?? '', signalType, payload.conviction ?? 0, now, now, scanTs ?? null, JSON.stringify(payload), 'active', payload.expires_at ?? null, payload.price ?? null);
+    }
+  },
+  getActive(minConviction = 30, limit = 20) {
+    return db.prepare(
+      "SELECT * FROM opportunity_signals WHERE status='active' AND conviction>=? ORDER BY conviction DESC LIMIT ?"
+    ).all(minConviction, limit).map(r => { try { return { ...r, payload: JSON.parse(r.payload || '{}') }; } catch { return { ...r, payload: {} }; } });
+  },
+  expireOld() {
+    const now = new Date().toISOString();
+    db.prepare("UPDATE opportunity_signals SET status='expired' WHERE status='active' AND expires_at IS NOT NULL AND expires_at < ?").run(now);
+  },
+  invalidate(sym, signalType) {
+    db.prepare("UPDATE opportunity_signals SET status='invalidated' WHERE sym=? AND signal_type=? AND status='active'")
+      .run(sym, signalType);
+  },
+  clearActive() {
+    db.prepare("UPDATE opportunity_signals SET status='expired' WHERE status='active'").run();
+  },
+};
+
+// ── Strategy Validation ───────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tracked_opportunities (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym               TEXT NOT NULL,
+    name              TEXT,
+    signal_type       TEXT NOT NULL,
+    conviction        REAL,
+    -- Entry snapshot
+    tracked_at        TEXT NOT NULL,
+    entry_price       REAL NOT NULL,
+    simulated_capital REAL DEFAULT 20000,
+    shares            REAL,
+    stop              REAL,
+    target1           REAL,
+    target2           REAL,
+    atr_pct           REAL,
+    -- Indicators frozen at entry
+    rsi               REAL,
+    mfi               REAL,
+    whale_score       REAL,
+    vol_ratio         REAL,
+    obv_trend         TEXT,
+    divergence        TEXT,
+    weekly_trend      TEXT,
+    market_regime     TEXT,
+    score             INTEGER,
+    max_score         INTEGER,
+    rs_score          REAL,
+    signals_json      TEXT,
+    -- Excursion tracking
+    mae               REAL DEFAULT 0,
+    mfe               REAL DEFAULT 0,
+    -- Outcome
+    status            TEXT DEFAULT 'tracking',
+    exit_price        REAL,
+    exit_date         TEXT,
+    exit_reason       TEXT,
+    -- User
+    notes             TEXT,
+    created_at        TEXT,
+    updated_at        TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS validation_milestones (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id     INTEGER NOT NULL,
+    checkpoint   TEXT NOT NULL,
+    target_date  TEXT NOT NULL,
+    actual_date  TEXT,
+    price        REAL,
+    pnl_pct      REAL,
+    pnl_sar      REAL,
+    drawdown_pct REAL,
+    peak_pct     REAL,
+    status       TEXT DEFAULT 'pending',
+    recorded_at  TEXT,
+    UNIQUE(track_id, checkpoint)
+  );
+`);
+
+export const dbTracked = {
+  insert(data) {
+    const r = db.prepare(`INSERT INTO tracked_opportunities
+      (sym,name,signal_type,conviction,tracked_at,entry_price,simulated_capital,shares,stop,target1,target2,atr_pct,
+       rsi,mfi,whale_score,vol_ratio,obv_trend,divergence,weekly_trend,market_regime,score,max_score,rs_score,signals_json,
+       status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'tracking',?,?)`)
+      .run(data.sym,data.name??'',data.signal_type,data.conviction??null,
+           data.tracked_at,data.entry_price,data.simulated_capital??20000,data.shares??null,
+           data.stop??null,data.target1??null,data.target2??null,data.atr_pct??null,
+           data.rsi??null,data.mfi??null,data.whale_score??null,data.vol_ratio??null,
+           data.obv_trend??null,data.divergence??null,data.weekly_trend??null,data.market_regime??null,
+           data.score??null,data.max_score??null,data.rs_score??null,
+           data.signals_json??null,data.tracked_at,data.tracked_at);
+    return r.lastInsertRowid;
+  },
+  getAll() {
+    return db.prepare('SELECT * FROM tracked_opportunities ORDER BY created_at DESC').all();
+  },
+  get(id) {
+    return db.prepare('SELECT * FROM tracked_opportunities WHERE id=?').get(id);
+  },
+  updateExcursion(id, mae, mfe) {
+    db.prepare('UPDATE tracked_opportunities SET mae=MIN(mae,?),mfe=MAX(mfe,?),updated_at=? WHERE id=?')
+      .run(mae, mfe, new Date().toISOString(), id);
+  },
+  close(id, status, exitPrice, exitDate) {
+    db.prepare('UPDATE tracked_opportunities SET status=?,exit_price=?,exit_date=?,exit_reason=?,updated_at=? WHERE id=?')
+      .run(status, exitPrice??null, exitDate??new Date().toISOString().slice(0,10), status, new Date().toISOString(), id);
+  },
+  addNote(id, note) {
+    db.prepare('UPDATE tracked_opportunities SET notes=?,updated_at=? WHERE id=?')
+      .run(note, new Date().toISOString(), id);
+  },
+  delete(id) {
+    db.prepare('DELETE FROM validation_milestones WHERE track_id=?').run(id);
+    db.prepare('DELETE FROM tracked_opportunities WHERE id=?').run(id);
+  },
+};
+
+export const dbMilestones = {
+  insert(data) {
+    db.prepare(`INSERT OR IGNORE INTO validation_milestones (track_id,checkpoint,target_date,status)
+      VALUES (?,?,?,'pending')`).run(data.track_id, data.checkpoint, data.target_date);
+  },
+  getPending(trackId) {
+    return db.prepare("SELECT * FROM validation_milestones WHERE track_id=? AND status='pending' ORDER BY target_date")
+      .all(trackId);
+  },
+  getAll(trackId) {
+    return db.prepare('SELECT * FROM validation_milestones WHERE track_id=? ORDER BY target_date')
+      .all(trackId);
+  },
+  update(trackId, checkpoint, data) {
+    db.prepare(`UPDATE validation_milestones SET actual_date=?,price=?,pnl_pct=?,pnl_sar=?,
+      drawdown_pct=?,peak_pct=?,status=?,recorded_at=? WHERE track_id=? AND checkpoint=?`)
+      .run(data.actual_date,data.price,data.pnl_pct,data.pnl_sar,data.drawdown_pct,
+           data.peak_pct,data.status,data.recorded_at??new Date().toISOString(),
+           trackId, checkpoint);
+  },
+  getAllForTracks(ids) {
+    if (!ids.length) return [];
+    return db.prepare(`SELECT * FROM validation_milestones WHERE track_id IN (${ids.map(()=>'?').join(',')})`)
+      .all(...ids);
+  },
+};
+
+// ── Goals profile ─────────────────────────────────────────────────────────────
+const DEFAULT_GOAL_PROFILE = {
+  goal_name: 'My Trading Goal',
+  capital_sar: 100000,
+  target_return_pct: 15,
+  horizon_months: 12,
+  max_drawdown_pct: 10,
+  risk_per_trade_pct: 1.5,
+  max_open_positions: 5,
+  preferred_markets: ['tasi'],
+  excluded_sectors: [],
+  sharia_required: false,
+  style_preference: ['Momentum', 'Trend'],
+  goal_start_date: null,
+  notes: '',
+};
+
+function getGoalMeta(key) {
+  const row = db.prepare('SELECT value FROM goals_profile WHERE key=?').get(key);
+  if (!row) return undefined;
+  try { return JSON.parse(row.value); } catch { return row.value; }
+}
+
+function setGoalMeta(key, value) {
+  db.prepare('INSERT OR REPLACE INTO goals_profile (key, value) VALUES (?,?)').run(key, JSON.stringify(value));
+}
+
+export const goalsProfile = {
+  get() {
+    const profile = { ...DEFAULT_GOAL_PROFILE };
+    for (const key of Object.keys(DEFAULT_GOAL_PROFILE)) {
+      const v = getGoalMeta(key);
+      if (v !== undefined) profile[key] = v;
+    }
+    return profile;
+  },
+  save(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+      setGoalMeta(key, value);
+    }
+  },
+};
+
+// ── Accuracy lab ──────────────────────────────────────────────────────────────
+export const accuracyLab = {
+  log({ sym, name, price_entry, price_stop, price_t1, price_t2, bias, score, max_score,
+        composite, scan_mode, style_tags, market, sector, hurst, atr_rank, rsi_entry, vol_ratio_entry }) {
+    const logged_at = new Date().toISOString().split('T')[0];
+    // Prevent duplicate for same sym on same day
+    const exists = db.prepare('SELECT id FROM accuracy_signals WHERE sym=? AND logged_at=? AND outcome IS NULL').get(sym, logged_at);
+    if (exists) return exists.id;
+    const result = db.prepare(`
+      INSERT INTO accuracy_signals
+      (sym,name,logged_at,price_entry,price_stop,price_t1,price_t2,bias,score,max_score,
+       composite,scan_mode,style_tags,market,sector,hurst,atr_rank,rsi_entry,vol_ratio_entry)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(sym, name||sym, logged_at, price_entry, price_stop, price_t1, price_t2, bias, score,
+           max_score, composite, scan_mode, JSON.stringify(style_tags||[]), market||null, sector||null,
+           hurst||null, atr_rank||null, rsi_entry||null, vol_ratio_entry||null);
+    return result.lastInsertRowid;
+  },
+
+  updateOutcome(id, { outcome, price_outcome, r_multiple }) {
+    const today = new Date().toISOString().split('T')[0];
+    const sig = db.prepare('SELECT * FROM accuracy_signals WHERE id=?').get(id);
+    if (!sig) return;
+    const days = sig.logged_at
+      ? Math.round((new Date(today) - new Date(sig.logged_at)) / 86400000)
+      : null;
+    db.prepare(`UPDATE accuracy_signals SET outcome=?,price_outcome=?,outcome_at=?,days_to_outcome=?,r_multiple=? WHERE id=?`)
+      .run(outcome, price_outcome, today, days, r_multiple, id);
+  },
+
+  checkAndExpire() {
+    // Expire signals older than 10 trading days with no outcome
+    // Rough: 14 calendar days ≈ 10 trading days
+    const cutoff = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+    const stale = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NULL AND logged_at < ?").all(cutoff);
+    for (const sig of stale) {
+      db.prepare("UPDATE accuracy_signals SET outcome='expired',outcome_at=? WHERE id=?")
+        .run(new Date().toISOString().split('T')[0], sig.id);
+    }
+    return stale.length;
+  },
+
+  checkPriceOutcomes(scanResults) {
+    const active = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NULL").all();
+    for (const sig of active) {
+      const r = scanResults.find(x => x.sym === sig.sym);
+      if (!r?.price) continue;
+      const price = r.price;
+      const isBear = ['STRONG SELL','SELL','AVOID'].includes(sig.bias);
+      const atStop = isBear ? price >= sig.price_stop : price <= sig.price_stop;
+      const atT1   = isBear ? price <= sig.price_t1  : price >= sig.price_t1;
+      const atT2   = isBear ? price <= sig.price_t2  : price >= sig.price_t2;
+      if (sig.price_stop && atStop) {
+        const rMult = sig.price_stop && sig.price_entry
+          ? +((sig.price_stop - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
+          : -1;
+        this.updateOutcome(sig.id, { outcome: 'stop', price_outcome: price, r_multiple: rMult });
+      } else if (sig.price_t2 && atT2) {
+        const rMult = sig.price_stop && sig.price_entry
+          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
+          : 2;
+        this.updateOutcome(sig.id, { outcome: 't2', price_outcome: price, r_multiple: rMult });
+      } else if (sig.price_t1 && atT1) {
+        const rMult = sig.price_stop && sig.price_entry
+          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
+          : 1;
+        this.updateOutcome(sig.id, { outcome: 't1', price_outcome: price, r_multiple: rMult });
+      }
+    }
+  },
+
+  getAll({ limit = 100, outcome = null } = {}) {
+    const where = outcome ? `WHERE outcome='${outcome}'` : '';
+    return db.prepare(`SELECT * FROM accuracy_signals ${where} ORDER BY logged_at DESC LIMIT ?`).all(limit);
+  },
+
+  getActive() {
+    return db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NULL ORDER BY logged_at DESC").all();
+  },
+
+  getStats() {
+    const all = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NOT NULL AND outcome != 'expired'").all();
+    if (!all.length) return { total: 0, t1_rate: 0, t2_rate: 0, stop_rate: 0, avg_r: 0, expectancy: 0 };
+    const t1  = all.filter(s => s.outcome === 't1' || s.outcome === 't2').length;
+    const t2  = all.filter(s => s.outcome === 't2').length;
+    const stops = all.filter(s => s.outcome === 'stop').length;
+    const rs  = all.map(s => s.r_multiple).filter(r => r != null);
+    const avg_r = rs.length ? +(rs.reduce((a,b)=>a+b,0)/rs.length).toFixed(2) : 0;
+    return {
+      total:     all.length,
+      active:    db.prepare("SELECT COUNT(*) as n FROM accuracy_signals WHERE outcome IS NULL").get().n,
+      expired:   db.prepare("SELECT COUNT(*) as n FROM accuracy_signals WHERE outcome='expired'").get().n,
+      t1_rate:   all.length ? Math.round(t1/all.length*100) : 0,
+      t2_rate:   all.length ? Math.round(t2/all.length*100) : 0,
+      stop_rate: all.length ? Math.round(stops/all.length*100) : 0,
+      avg_r,
+      expectancy: +(avg_r).toFixed(2),
+    };
+  },
+
+  getInsights() {
+    const completed = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IN ('t1','t2','stop')").all();
+    if (completed.length < 5) return [];
+    const groups = {};
+    for (const s of completed) {
+      const tags = JSON.parse(s.style_tags||'[]');
+      const styleKey = tags[0] || 'Unknown';
+      const mktKey   = s.market || 'unknown';
+      const key      = `${styleKey}__${mktKey}`;
+      if (!groups[key]) groups[key] = { key, style: styleKey, market: mktKey, signals: [] };
+      groups[key].signals.push(s);
+    }
+    return Object.values(groups)
+      .filter(g => g.signals.length >= 3)
+      .map(g => {
+        const t1  = g.signals.filter(s => s.outcome==='t1'||s.outcome==='t2').length;
+        const rs  = g.signals.map(s=>s.r_multiple).filter(r=>r!=null);
+        const avgR= rs.length ? +(rs.reduce((a,b)=>a+b,0)/rs.length).toFixed(2) : 0;
+        return {
+          style: g.style, market: g.market, count: g.signals.length,
+          t1_rate: Math.round(t1/g.signals.length*100), avg_r: avgR,
+          expectancy: avgR,
+          rating: t1/g.signals.length >= 0.7 && avgR >= 1 ? 'strong'
+                : t1/g.signals.length >= 0.5 ? 'moderate' : 'weak',
+        };
+      })
+      .sort((a,b) => b.expectancy - a.expectancy);
+  },
+
+  manualLog({ sym, name, price_entry, price_stop, price_t1, price_t2, bias, notes }) {
+    return this.log({ sym, name, price_entry, price_stop, price_t1, price_t2, bias, notes });
+  },
+
+  delete(id) {
+    db.prepare('DELETE FROM accuracy_signals WHERE id=?').run(id);
+  },
+
+  clearAll() {
+    const n = db.prepare('SELECT COUNT(*) as n FROM accuracy_signals').get().n;
+    db.exec('DELETE FROM accuracy_signals');
+    return n;
+  },
+
+  // ── Kelly position sizing ─────────────────────────────────────────────────
+  // Returns win-rate statistics and Kelly fraction for a given market+style combination.
+  // Uses JSON double-quote matching for style_tags stored as JSON.stringify arrays.
+  winRateFor(market, primaryStyleTag) {
+    const tag = primaryStyleTag || 'Unknown';
+    const rows = db.prepare(`
+      SELECT outcome, r_multiple FROM accuracy_signals
+      WHERE outcome IN ('t1','t2','stop')
+        AND market = ?
+        AND style_tags LIKE ?
+      ORDER BY logged_at DESC LIMIT 50
+    `).all(market, `%"${tag}"%`);
+
+    if (rows.length < 5) return null;
+
+    const wins  = rows.filter(r => r.outcome === 't1' || r.outcome === 't2');
+    const stops = rows.filter(r => r.outcome === 'stop');
+    const win_rate = wins.length / rows.length;
+
+    const avgWinR  = wins.length  ? wins.reduce((a, r)  => a + (r.r_multiple ?? 1), 0) / wins.length   : 1;
+    const avgLossR = stops.length ? Math.abs(stops.reduce((a, r) => a + (r.r_multiple ?? -1), 0) / stops.length) : 1;
+
+    if (avgWinR <= 0 || avgLossR <= 0) return null;
+
+    const R = avgWinR / avgLossR;
+    const kelly_full = Math.max(0, win_rate - (1 - win_rate) / R);
+    const kelly_half = Math.min(0.20, kelly_full * 0.5); // capped at 20%
+
+    const expectancy = +(win_rate * avgWinR - (1 - win_rate) * avgLossR).toFixed(2);
+    const confidence = rows.length >= 20 ? 'high' : rows.length >= 10 ? 'moderate' : 'low';
+
+    return {
+      sample: rows.length,
+      win_rate_pct: +(win_rate * 100).toFixed(1),
+      avg_win_r:    +avgWinR.toFixed(2),
+      avg_loss_r:   +avgLossR.toFixed(2),
+      kelly_full_pct: +(kelly_full * 100).toFixed(1),
+      kelly_half_pct: +(kelly_half * 100).toFixed(1),
+      expectancy,
+      confidence,
+    };
+  },
+
+  // ── Win-rate breakdown by category (market × style_tag) ───────────────────
+  winRateByCategory() {
+    const rows = db.prepare(`
+      SELECT market, style_tags, outcome, r_multiple
+      FROM accuracy_signals
+      WHERE outcome IN ('t1','t2','stop')
+      ORDER BY logged_at DESC LIMIT 500
+    `).all();
+
+    const map = {};
+    for (const row of rows) {
+      let tags;
+      try { tags = JSON.parse(row.style_tags || '[]'); } catch { tags = []; }
+      const tag = tags[0] || 'Unknown';
+      const key = `${row.market || 'unknown'}__${tag}`;
+      if (!map[key]) map[key] = { market: row.market || 'unknown', style: tag, wins: 0, stops: 0, winRs: [], lossRs: [] };
+      if (row.outcome === 't1' || row.outcome === 't2') {
+        map[key].wins++;
+        if (row.r_multiple != null) map[key].winRs.push(row.r_multiple);
+      } else {
+        map[key].stops++;
+        if (row.r_multiple != null) map[key].lossRs.push(Math.abs(row.r_multiple));
+      }
+    }
+
+    return Object.values(map)
+      .filter(g => (g.wins + g.stops) >= 3)
+      .map(g => {
+        const total    = g.wins + g.stops;
+        const win_rate = g.wins / total;
+        const avgWinR  = g.winRs.length  ? g.winRs.reduce((a,b)=>a+b,0)  / g.winRs.length  : 1;
+        const avgLossR = g.lossRs.length ? g.lossRs.reduce((a,b)=>a+b,0) / g.lossRs.length : 1;
+        const expectancy = +(win_rate * avgWinR - (1 - win_rate) * avgLossR).toFixed(2);
+        const rating   = win_rate >= 0.7 && expectancy >= 1 ? 'strong'
+                       : win_rate >= 0.5 && expectancy >= 0 ? 'moderate' : 'weak';
+        return {
+          market: g.market, style: g.style,
+          total, wins: g.wins, stops: g.stops,
+          win_rate_pct: +(win_rate * 100).toFixed(1),
+          avg_win_r: +avgWinR.toFixed(2), avg_loss_r: +avgLossR.toFixed(2),
+          expectancy, rating,
+        };
+      })
+      .sort((a, b) => b.expectancy - a.expectancy);
   },
 };
 
