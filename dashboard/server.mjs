@@ -560,33 +560,50 @@ function updateScoreHistory(results) {
   });
 }
 
-function autoLogAccuracySignals(results) {
-  // After each scan, log STRONG BUY/SELL signals (score ≥7) for accuracy tracking
-  // Also check if any active signals have hit their price targets
+function autoLogAccuracySignals(results, marketKey) {
+  // After each scan, log STRONG BUY/SELL signals (score ≥7) for accuracy tracking.
+  // regime and market_index are sourced from the scan result (per-market, already computed).
+  // Label is resolved to EXIT/EXIT NOW/SKIP/AVOID based on regime + position holding.
   try {
     accuracyLab.checkPriceOutcomes(results);
     accuracyLab.checkAndExpire();
+
     const strongSignals = results.filter(r =>
       (r.bias === 'STRONG BUY' || r.bias === 'STRONG SELL') && r.score >= 7 && r.atr
     );
+
     for (const r of strongSignals) {
       const isBear = r.bias === 'STRONG SELL';
-      const stop = r.atr ? (isBear ? r.price + 1.5 * r.atr : r.price - 1.5 * r.atr) : null;
-      const t1   = r.atr ? (isBear ? r.price - 1.5 * r.atr : r.price + 1.5 * r.atr) : null;
-      const t2   = r.atr ? (isBear ? r.price - 3 * r.atr   : r.price + 3 * r.atr)   : null;
+      const stop = isBear ? r.price + 1.5 * r.atr : r.price - 1.5 * r.atr;
+      const t1   = isBear ? r.price - 1.5 * r.atr : r.price + 1.5 * r.atr;
+      const t2   = isBear ? r.price - 3 * r.atr   : r.price + 3 * r.atr;
+
       const market = r.sym.startsWith('TADAWUL:') ? 'tasi'
-                   : r.sym.includes('USD') ? 'crypto'
-                   : ['TVC:','NYMEX:','COMEX:'].some(p=>r.sym.startsWith(p)) ? 'commodity' : 'us';
+                   : r.sym.match(/XRP|BTC|ETH|SOL|BNB/) ? 'crypto'
+                   : ['TVC:','NYMEX:','COMEX:'].some(p => r.sym.startsWith(p)) ? 'commodity' : 'us';
+
+      const regime      = r.market_regime || 'neutral';
+      const marketIndex = INDEX_FOR_MARKET[market] || INDEX_FOR_MARKET.tasi;
+
+      // Check if user holds this position
+      const isHolding = !!dbPositions.get(r.sym);
+
+      // Resolve display label
+      const resolvedBias = resolveSignalLabel(r.bias, regime, isHolding);
+
       accuracyLab.log({
         sym: r.sym, name: r.name,
         price_entry: r.price, price_stop: stop, price_t1: t1, price_t2: t2,
-        bias: r.bias, score: r.score, max_score: r.maxScore || 9,
+        bias: resolvedBias,
+        score: r.score, max_score: r.maxScore || 9,
         composite: r.composite || Math.round(r.score / (r.maxScore || 9) * 100),
         scan_mode: state.scan.mode || 'swing',
         style_tags: r.style_tags || [],
         market, sector: null,
         hurst: r.hurst, atr_rank: r.atr_pct_rank,
         rsi_entry: r.rsi, vol_ratio_entry: r.vol_ratio,
+        regime,
+        market_index: marketIndex,
       });
     }
   } catch (e) { console.warn('[lab] auto-log error:', e.message); }

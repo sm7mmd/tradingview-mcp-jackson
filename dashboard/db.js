@@ -341,6 +341,7 @@ export const positions = {
     const rows = db.prepare('SELECT * FROM positions').all();
     return Object.fromEntries(rows.map(r => [r.sym, JSON.parse(r.data)]));
   },
+  get(sym) { return db.prepare('SELECT data FROM positions WHERE sym=?').get(sym) || null; },
   set(sym, data) {
     db.prepare('INSERT OR REPLACE INTO positions (sym,data) VALUES (?,?)').run(sym, JSON.stringify(data));
   },
