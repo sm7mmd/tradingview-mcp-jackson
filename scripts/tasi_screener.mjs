@@ -460,12 +460,14 @@ function macdHist(closes) {
   return { macd: lastMacd, signal: lastSignal, hist: lastMacd - lastSignal, prevHist };
 }
 
-function volumeCheck(volumes) {
+function volumeCheck(volumes, isTasi = false) {
   if (volumes.length < 20) return { ratio: null, ok: false };
   const sma20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const lastVol = volumes[volumes.length - 1];
   const ratio = lastVol / sma20;
-  return { ratio: Math.round(ratio * 100) / 100, ok: ratio >= 1.5 };
+  // TASI stocks have tighter floats — 1.2× is sufficient confirmation
+  const baseThreshold = isTasi ? 1.2 : 1.5;
+  return { ratio: Math.round(ratio * 100) / 100, ok: ratio >= baseThreshold, baseThreshold };
 }
 
 // Returns array of RSI values (null for first period bars)
@@ -566,6 +568,135 @@ export function calcVolumeZScore(volumes, period = 20) {
   const std  = Math.sqrt(slice.reduce((a, b) => a + ((b||0) - mean) ** 2, 0) / period);
   if (std === 0) return 0;
   return +((volumes[volumes.length - 1] - mean) / std).toFixed(2);
+}
+
+// Hurst Exponent via Rescaled Range (R/S) analysis.
+// H > 0.55 → trending (momentum), H < 0.45 → mean-reverting, 0.45–0.55 → random walk.
+// Uses last 200 bars with lags 10–80 to keep sub-period count ≥ 3.
+export function calcHurst(closes) {
+  const prices = closes.slice(-200);
+  if (prices.length < 50) return null;
+
+  const logR = [];
+  for (let i = 1; i < prices.length; i++) {
+    if (prices[i - 1] > 0 && prices[i] > 0) logR.push(Math.log(prices[i] / prices[i - 1]));
+  }
+  if (logR.length < 30) return null;
+
+  const maxLag = Math.min(80, Math.floor(logR.length / 3));
+  const lags = [], rsArr = [];
+
+  for (let lag = 10; lag <= maxLag; lag += Math.max(1, Math.floor(lag / 4))) {
+    const M = Math.floor(logR.length / lag);
+    if (M < 2) continue;
+    let rsSum = 0, count = 0;
+    for (let m = 0; m < M; m++) {
+      const sub  = logR.slice(m * lag, (m + 1) * lag);
+      const mean = sub.reduce((a, b) => a + b, 0) / lag;
+      const dm   = sub.map(x => x - mean);
+      let cum = 0;
+      const cs = dm.map(x => (cum += x));
+      const R  = Math.max(...cs) - Math.min(...cs);
+      const S  = Math.sqrt(sub.reduce((a, x) => a + (x - mean) ** 2, 0) / lag);
+      if (S > 0) { rsSum += R / S; count++; }
+    }
+    if (count > 0 && rsSum / count > 0) {
+      lags.push(Math.log(lag));
+      rsArr.push(Math.log(rsSum / count));
+    }
+  }
+  if (lags.length < 4) return null;
+
+  const n   = lags.length;
+  const sx  = lags.reduce((a, b) => a + b, 0);
+  const sy  = rsArr.reduce((a, b) => a + b, 0);
+  const sxy = lags.reduce((a, x, i) => a + x * rsArr[i], 0);
+  const sx2 = lags.reduce((a, x) => a + x * x, 0);
+  const den = n * sx2 - sx * sx;
+  if (den === 0) return null;
+
+  const H = (n * sxy - sx * sy) / den;
+  return +Math.max(0, Math.min(1, H)).toFixed(2);
+}
+
+// ATR Percentile Rank: where is today's ATR relative to the past `lookback` days?
+// Returns 0–100. Low (≤20) = volatility compressed (coil). High (≥80) = volatility expanded (dangerous to chase).
+export function calcATRPercentileRank(highs, lows, closes, period = 14, lookback = 252) {
+  const n = closes.length;
+  if (n < period + 1) return null;
+
+  // Build full TR series
+  const tr = [];
+  for (let i = 1; i < n; i++) {
+    tr.push(Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i]  - closes[i - 1])
+    ));
+  }
+  if (tr.length < period) return null;
+
+  // Wilder-smoothed ATR series
+  let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const atrSeries = [atr];
+  for (let i = period; i < tr.length; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
+    atrSeries.push(atr);
+  }
+
+  const window = atrSeries.slice(-Math.min(lookback, atrSeries.length));
+  if (window.length < 20) return null;
+
+  const current = window[window.length - 1];
+  const rank = Math.round(window.filter(v => v <= current).length / window.length * 100);
+  return rank;
+}
+
+// ── Style tag auto-detection ──────────────────────────────────────────────────
+// Assigns up to 2 style badges per stock. Replaces the mode concept.
+export function computeStyleTags(r) {
+  const tags = [];
+  const { ema13, ema34, ema89, ema200 } = r.emas || {};
+  const emaStack = ema13 > ema34 && ema34 > ema89;
+  const price = r.price || 0;
+  const isBull = !['STRONG SELL','SELL','AVOID'].includes(r.bias) && r.bias !== 'SKIP';
+
+  if (!isBull) {
+    if (r.vol_ratio >= 2.0 && r.rs_score != null && r.rs_score < -1.0) tags.push('Breakout');
+    return tags;
+  }
+
+  // Momentum: RSI 55-70, MACD positive, vol >1.5x, solid score
+  if (r.rsi >= 55 && r.rsi < 72 && r.macd_hist > 0 && r.vol_ratio >= 1.5 && r.score >= 6) tags.push('Momentum');
+
+  // Trend: EMA stack + above 200 + Hurst trending or unknown
+  if (emaStack && price > (ema200 || 0) && (r.hurst == null || r.hurst > 0.5)) tags.push('Trend');
+
+  // Breakout: volume surge + RS leadership + score
+  if (r.vol_ratio >= 2.0 && r.rs_score != null && r.rs_score > 1.0 && r.score >= 5) tags.push('Breakout');
+
+  // Recovery: RSI building from oversold while price coiling
+  if (r.rsi_buildup?.is_building) tags.push('Recovery');
+
+  // Pullback: price touching EMA34 in uptrend (buying the dip)
+  if (emaStack && price > (ema200 || 0) && ema34 && Math.abs(price - ema34) / ema34 < 0.015) tags.push('Pullback');
+
+  return tags.slice(0, 2);
+}
+
+// Rolling VWAP anchored to the last `period` daily bars.
+// Returns the volume-weighted average price of the window, or null if data is insufficient.
+export function calcVWAP(highs, lows, closes, volumes, period = 20) {
+  if (closes.length < period) return null;
+  let cumTPV = 0, cumVol = 0;
+  const start = closes.length - period;
+  for (let i = start; i < closes.length; i++) {
+    const tp = (highs[i] + lows[i] + closes[i]) / 3;
+    const v  = volumes[i] || 0;
+    cumTPV  += tp * v;
+    cumVol  += v;
+  }
+  return cumVol > 0 ? cumTPV / cumVol : null;
 }
 
 function linSlope(arr) {
@@ -671,9 +802,10 @@ function atrCalc(highs, lows, closes, period = 14) {
 // ── Bias Scoring ──────────────────────────────────────────────────────────────
 function scoreBias(emas, rsiVal, macdData, volData, price, mode = 'swing', rsScore = null, context = {}) {
   const { ema13, ema34, ema89, ema200 } = emas;
-  const { srLevels, avgVolume, rsScore60d, isExtended } = context;
+  const { srLevels, avgVolume, rsScore60d, isExtended, vwap20, obv_trend, isTasi } = context;
   const bullFlags = [], bearFlags = [], warnings = [];
-  const maxScore = 8;
+  // maxScore 9 in swing/position (8 criteria + 1 VWAP); breakout stays 8
+  const maxScore = mode === 'breakout' ? 8 : 9;
 
   // ── Breakout mode scoring ─────────────────────────────────────────────────
   if (mode === 'breakout') {
@@ -773,35 +905,52 @@ function scoreBias(emas, rsiVal, macdData, volData, price, mode = 'swing', rsSco
   } else {
     warnings.push("EMA stack not aligned");
   }
+
+  // EMA200: 1 pt (not 2). Second pt replaced by OBV slope for smarter accumulation detection.
   if (price > ema200) {
-    bullish += 2; bullFlags.push("Above EMA 200 ✓");
+    bullish += 1; bullFlags.push("Above EMA 200 ✓");
   }
+  // OBV slope: 1 pt — rising OBV = institutions accumulating regardless of price noise
+  if (obv_trend === 'rising') {
+    bullish += 1; bullFlags.push("OBV rising (accumulation) ✓");
+  } else if (obv_trend === 'falling') {
+    warnings.push("OBV falling — distribution pressure detected");
+  }
+
   if (rsiVal !== null) {
-    if (rsiVal >= 52 && rsiVal < 78) {
-      bullish += 2; bullFlags.push(`RSI ${rsiVal.toFixed(1)} ✓`);
-    } else if (rsiVal >= 78) {
-      warnings.push(`RSI ${rsiVal.toFixed(1)} — overbought`);
+    // Cap raised to 85: real breakout momentum can sustain RSI 80-85.
+    // Flag "Stretched" above 80 as a caution, not a disqualifier.
+    if (rsiVal >= 52 && rsiVal <= 85) {
+      const stretched = rsiVal > 80;
+      bullish += 2; bullFlags.push(`RSI ${rsiVal.toFixed(1)} ✓${stretched ? ' ⚡ Stretched' : ''}`);
+    } else if (rsiVal > 85) {
+      warnings.push(`RSI ${rsiVal.toFixed(1)} — extreme overbought, elevated reversal risk`);
     }
   }
+
   if (macdData && macdData.hist > 0) {
-    // Require crossing zero (was negative) OR accelerating (growing histogram) — not just barely positive
-    const crossing     = macdData.prevHist !== null && macdData.prevHist <= 0;
-    const accelerating = macdData.prevHist !== null && macdData.hist > macdData.prevHist;
-    if (crossing || accelerating) {
-      bullish += 1; bullFlags.push(`MACD ${crossing ? 'crossing ✓' : 'accelerating ✓'}`);
-    } else {
-      warnings.push('MACD positive but flat/decelerating');
-    }
+    // Any positive MACD histogram counts — stocks in sustained uptrends naturally have positive MACD.
+    // Label crossing/accelerating for additional context but don't gate on them.
+    const crossing = macdData.prevHist !== null && macdData.prevHist <= 0;
+    const accel    = macdData.prevHist !== null && macdData.hist > macdData.prevHist;
+    const label    = crossing ? 'crossing ✓' : accel ? 'accelerating ✓' : 'positive ✓';
+    bullish += 1; bullFlags.push(`MACD ${label}`);
   }
+
   {
-    // Thin stocks (avg daily vol < 300k) require higher confirmation (2×) to avoid false signals
-    const thinStock = avgVolume != null && avgVolume < 300000;
-    const volThreshold = thinStock ? 2.0 : 1.5;
+    const thinStock   = avgVolume != null && avgVolume < 300000;
+    const baseThr     = volData.baseThreshold ?? (isTasi ? 1.2 : 1.5);
+    const volThreshold = thinStock ? 2.0 : baseThr;
     if (volData.ratio !== null && volData.ratio >= volThreshold) {
       bullish += 1; bullFlags.push(`Volume ${volData.ratio}× ✓${thinStock ? ' (thin)' : ''}`);
     } else if (volData.ratio !== null) {
       warnings.push(`Volume ${volData.ratio}× (need ${volThreshold}×${thinStock ? ' — thin stock' : ''})`);
     }
+  }
+
+  if (vwap20 != null) {
+    if (price > vwap20) { bullish += 1; bullFlags.push(`Above VWAP (${vwap20.toFixed(2)}) ✓`); }
+    else { warnings.push(`Below VWAP (${vwap20.toFixed(2)})`); }
   }
 
   // Penalty: price within 3% below a key resistance level — unfavourable entry point
@@ -813,40 +962,48 @@ function scoreBias(emas, rsiVal, macdData, volData, price, mode = 'swing', rsSco
     }
   }
 
-  // ── Bearish criteria (8 pts, mirrored) ───────────────────────────────────
+  // ── Bearish criteria (9 pts, mirrored) ───────────────────────────────────
   let bearish = 0;
 
   if (ema13 < ema34 && ema34 < ema89) {
     bearish += 2; bearFlags.push("EMA stack inverted ✓");
   }
   if (price < ema200) {
-    bearish += 2; bearFlags.push("Below EMA 200 ✓");
+    bearish += 1; bearFlags.push("Below EMA 200 ✓");
   }
+  if (obv_trend === 'falling') {
+    bearish += 1; bearFlags.push("OBV falling (distribution) ✓");
+  } else if (obv_trend === 'rising') {
+    warnings.push("OBV rising — buying pressure building");
+  }
+
   if (rsiVal !== null) {
-    if (rsiVal > 22 && rsiVal <= 48) {
+    if (rsiVal >= 15 && rsiVal <= 43) {
       bearish += 2; bearFlags.push(`RSI ${rsiVal.toFixed(1)} weak ✓`);
-    } else if (rsiVal <= 22) {
-      warnings.push(`RSI ${rsiVal.toFixed(1)} — oversold (potential bounce)`);
+    } else if (rsiVal < 15) {
+      warnings.push(`RSI ${rsiVal.toFixed(1)} — extreme oversold (potential bounce)`);
     }
   }
   if (macdData && macdData.hist < 0) {
-    const crossing     = macdData.prevHist !== null && macdData.prevHist >= 0;
-    const accelerating = macdData.prevHist !== null && macdData.hist < macdData.prevHist;
-    if (crossing || accelerating) {
-      bearish += 1; bearFlags.push(`MACD ${crossing ? 'crossing ✓' : 'accelerating ✓'}`);
-    } else {
-      warnings.push('MACD negative but flat/recovering');
-    }
+    const crossing = macdData.prevHist !== null && macdData.prevHist >= 0;
+    const accel    = macdData.prevHist !== null && macdData.hist < macdData.prevHist;
+    const label    = crossing ? 'crossing ✓' : accel ? 'accelerating ✓' : 'negative ✓';
+    bearish += 1; bearFlags.push(`MACD ${label}`);
   }
   {
-    // Thin stocks (avg daily vol < 300k) require higher confirmation (2×) to avoid false signals
-    const thinStock = avgVolume != null && avgVolume < 300000;
-    const volThreshold = thinStock ? 2.0 : 1.5;
+    const thinStock    = avgVolume != null && avgVolume < 300000;
+    const baseThr      = volData.baseThreshold ?? (isTasi ? 1.2 : 1.5);
+    const volThreshold = thinStock ? 2.0 : baseThr;
     if (volData.ratio !== null && volData.ratio >= volThreshold) {
       bearish += 1; bearFlags.push(`Volume ${volData.ratio}× ✓${thinStock ? ' (thin)' : ''}`);
     } else if (volData.ratio !== null) {
       warnings.push(`Volume ${volData.ratio}× (need ${volThreshold}×${thinStock ? ' — thin stock' : ''})`);
     }
+  }
+
+  if (vwap20 != null) {
+    if (price < vwap20) { bearish += 1; bearFlags.push(`Below VWAP (${vwap20.toFixed(2)}) ✓`); }
+    else { warnings.push(`Above VWAP (${vwap20.toFixed(2)}) — selling pressure below VWAP threshold`); }
   }
 
   // Penalty: price within 3% above a key support level (potential bounce) — reduces conviction
@@ -907,6 +1064,146 @@ function scoreBias(emas, rsiVal, macdData, volData, price, mode = 'swing', rsSco
   return { bias, score, maxScore, pct, bullish_score: bullish, bearish_score: bearish, flags, warnings, proximity };
 }
 
+// ── Pattern Recognition Engine ────────────────────────────────────────────────
+// Returns array of detected chart patterns. All inputs are full OHLCV arrays (260 bars).
+// Uses only the last 5–20 bars for each pattern — the full arrays are just passed for convenience.
+export function detectPatterns(closes, highs, lows, volumes, atrVal, avgVol20d) {
+  const patterns = [];
+  const n = closes.length;
+  if (n < 20) return patterns;
+
+  const price = closes[n - 1];
+
+  // 1. Inside Bar — today's range contained within yesterday's (volatility compression)
+  if (highs[n - 1] < highs[n - 2] && lows[n - 1] > lows[n - 2]) {
+    patterns.push({ name: 'Inside Bar', tag: 'inside_bar', bullish: true,
+      desc: 'Range inside prior bar — volatility compressing, breakout pending' });
+  }
+
+  // 2. Volume Dry-Up — declining participation while price holds (smart money absorbing)
+  if (avgVol20d > 0 && n >= 4) {
+    const v3avg = (volumes[n - 1] + volumes[n - 2] + volumes[n - 3]) / 3;
+    const barRange = highs[n - 1] - lows[n - 1];
+    const priceInUpperHalf = barRange > 0 ? (price - lows[n - 1]) / barRange > 0.4 : false;
+    if (v3avg < avgVol20d * 0.65 && priceInUpperHalf) {
+      patterns.push({ name: 'Vol Dry-Up', tag: 'vol_dry_up', bullish: true,
+        desc: 'Volume declining while price holds near high — supply being absorbed' });
+    }
+  }
+
+  // 3. Higher Lows — 3 consecutive swing lows each higher than previous (buyer pressure building)
+  // Uses 2-bar confirmation to avoid false pivots in a 15-bar window
+  if (n >= 15) {
+    const lows15 = lows.slice(-15);
+    const swingLows = [];
+    for (let i = 1; i < lows15.length - 1; i++) {
+      if (lows15[i] <= lows15[i - 1] && lows15[i] <= lows15[i + 1]) swingLows.push(lows15[i]);
+    }
+    if (swingLows.length >= 3) {
+      const last3 = swingLows.slice(-3);
+      if (last3[1] > last3[0] && last3[2] > last3[1]) {
+        patterns.push({ name: 'Higher Lows', tag: 'higher_lows', bullish: true,
+          desc: 'Three rising swing lows — buyers stepping in higher each time' });
+      }
+    }
+  }
+
+  // 4. Bull Flag — impulse move followed by tight consolidation
+  if (n >= 11) {
+    const impulseClose = closes[n - 6], impulseOpen = closes[n - 11];
+    const impulsePct = impulseOpen > 0 ? (impulseClose - impulseOpen) / impulseOpen : 0;
+    const impulseH = Math.max(...highs.slice(-10, -5));
+    const impulseL = Math.min(...lows.slice(-10, -5));
+    const impulseRange = impulseH - impulseL;
+    const consH = Math.max(...highs.slice(-5));
+    const consL = Math.min(...lows.slice(-5));
+    const consRange = consH - consL;
+    if (impulsePct >= 0.04 && impulseRange > 0 && consRange < impulseRange * 0.4 && price > impulseClose * 0.98) {
+      patterns.push({ name: 'Bull Flag', tag: 'bull_flag', bullish: true,
+        desc: `${(impulsePct * 100).toFixed(1)}% impulse, tight consolidation — continuation setup` });
+    }
+  }
+
+  // 5. Bear Flag — same logic for downside continuation
+  if (n >= 11) {
+    const impulseClose = closes[n - 6], impulseOpen = closes[n - 11];
+    const impulsePct = impulseOpen > 0 ? (impulseOpen - impulseClose) / impulseOpen : 0;
+    const impulseH = Math.max(...highs.slice(-10, -5));
+    const impulseL = Math.min(...lows.slice(-10, -5));
+    const impulseRange = impulseH - impulseL;
+    const consH = Math.max(...highs.slice(-5));
+    const consL = Math.min(...lows.slice(-5));
+    const consRange = consH - consL;
+    if (impulsePct >= 0.04 && impulseRange > 0 && consRange < impulseRange * 0.4 && price < impulseClose * 1.02) {
+      patterns.push({ name: 'Bear Flag', tag: 'bear_flag', bullish: false,
+        desc: `${(impulsePct * 100).toFixed(1)}% decline, tight consolidation — downside continuation` });
+    }
+  }
+
+  // 6. Coil at High — price holding near 20-day high with ATR contracting (pre-breakout tension)
+  if (n >= 25 && atrVal > 0) {
+    const high20 = Math.max(...highs.slice(-20));
+    const nearHigh20 = high20 > 0 && price >= high20 * 0.97;
+    // True ranges for last 10 bars, compare first 5 vs last 5
+    const trs = [];
+    for (let i = n - 10; i < n; i++) {
+      if (closes[i - 1] != null)
+        trs.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
+    }
+    const early5avg = trs.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+    const late5avg  = trs.slice(5).reduce((a, b) => a + b, 0) / 5;
+    if (nearHigh20 && early5avg > 0 && late5avg < early5avg * 0.75) {
+      patterns.push({ name: 'Coil at High', tag: 'coil_at_high', bullish: true,
+        desc: 'ATR contracting near 20-day high — coiling before potential breakout' });
+    }
+  }
+
+  return patterns;
+}
+
+// ── Conviction Score (multi-factor, 0–100) ───────────────────────────────────
+// Replaces the simple composite (score/max×100) with a weighted blend of all available signals.
+// Field name: `conviction_score` (distinct from `conviction` used in opportunity_signals).
+export function computeConviction(result, marketRegime) {
+  const { score, maxScore, whale_score, rs_score, obv_trend, bias, atr_pct_rank, patterns } = result;
+  if (!bias || ['ERROR', 'NO_DATA', 'SKIP'].includes(bias)) return 0;
+
+  const isBull = ['STRONG BUY', 'BUY', 'WATCH'].includes(bias);
+  const isBear = ['STRONG SELL', 'SELL', 'AVOID'].includes(bias);
+  if (!isBull && !isBear) return 0;
+
+  // Technical: 40 pts max
+  const tech = Math.round((score || 0) / (maxScore || 9) * 40);
+
+  // Smart money (whale_score 0-10): 20 pts max
+  const sm = Math.round((whale_score || 0) / 10 * 20);
+
+  // RS leadership: 20 pts max (normalized: ±5% = full range)
+  let rs = 0;
+  if (rs_score != null) {
+    const raw = isBull ? rs_score : -rs_score;
+    rs = Math.round(Math.min(20, Math.max(0, (raw + 5) / 10 * 20)));
+  }
+
+  // OBV confirmation: 10 pts if direction matches signal
+  const obvOk = (isBull && obv_trend === 'rising') || (isBear && obv_trend === 'falling');
+  const obv = obvOk ? 10 : 0;
+
+  // Regime alignment: 10 pts if aligned, 5 if neutral, 0 if against
+  const regime = marketRegime || 'neutral';
+  const regPts = (isBull && regime === 'bull') || (isBear && regime === 'bear') ? 10
+               : regime === 'neutral' ? 5 : 0;
+
+  // Pattern bonus: +3 per directional pattern matching signal, capped at +10
+  const dirPatterns = (patterns || []).filter(p => p.bullish === isBull);
+  const patternBonus = Math.min(10, dirPatterns.length * 3);
+
+  // ATR coiling bonus: +5 if volatility is compressed
+  const coilBonus = (atr_pct_rank != null && atr_pct_rank <= 25) ? 5 : 0;
+
+  return Math.min(100, tech + sm + rs + obv + regPts + patternBonus + coilBonus);
+}
+
 // ── Exported run function (for dashboard server) ─────────────────────────────
 export { TASI_STOCKS, emaArray, rsi as calcRsi, macdHist, volumeCheck, scoreBias, atrCalc, rsiSeries, findSRLevels, detectDivergence, computeSeasonality };
 // calcVolatilityCompression and calcRsiBuildup are exported via `export function` above
@@ -926,6 +1223,7 @@ export async function runScreener({ onProgress, symbols, market, investMode, mod
 
   // ── Fetch index for Relative Strength + market regime (single call, before main loop) ────
   let indexChange20d = null;
+  let indexChange63d = null; // actual 63-day RS — replaces the broken ×3 proxy
   let marketRegime = 'neutral'; // 'bull' | 'neutral' | 'bear'
   const idxYahoo = YAHOO_INDEX[market] || YAHOO_INDEX.tasi;
   try {
@@ -934,9 +1232,15 @@ export async function runScreener({ onProgress, symbols, market, investMode, mod
       const iCloses = idxBars.map(b => b.close);
       const iLast   = iCloses[iCloses.length - 1];
 
-      // 20-day RS (existing)
+      // 20-day RS (kept for short-term momentum display)
       const i20 = iCloses[iCloses.length - 21];
       if (i20 > 0) indexChange20d = (iLast - i20) / i20 * 100;
+
+      // 63-day RS: actual 3-month index change (replaces broken ×3 proxy)
+      if (iCloses.length >= 64) {
+        const i63 = iCloses[iCloses.length - 64];
+        if (i63 > 0) indexChange63d = (iLast - i63) / i63 * 100;
+      }
 
       // Market regime: index above EMA 200 AND EMA 13 > EMA 34
       if (iCloses.length >= 200) {
@@ -986,29 +1290,34 @@ export async function runScreener({ onProgress, symbols, market, investMode, mod
         ema200: e200[e200.length - 1],
       };
 
+      const isTasi   = sym.startsWith('TADAWUL:');
       const rsiVal   = rsi(closes, 14);
       const rsiVals  = rsiSeries(closes, 14);
       const macdData = macdHist(closes);
-      const volData  = volumeCheck(volumes);
+      const volData  = volumeCheck(volumes, isTasi);
       const atrVal   = atrCalc(highs, lows, closes, 14);
-      const rsScore  = (indexChange20d !== null && closes.length >= 21)
+
+      // 63-day RS (actual, replaces both the old 20-day and the broken 60-day×3 proxy)
+      const rsScore = (indexChange63d !== null && closes.length >= 64)
+        ? Math.round(((price - closes[closes.length - 64]) / closes[closes.length - 64] * 100 - indexChange63d) * 100) / 100
+        : (indexChange20d !== null && closes.length >= 21)
+          ? Math.round(((price - closes[closes.length - 21]) / closes[closes.length - 21] * 100 - indexChange20d) * 100) / 100
+          : null;
+
+      // 20-day RS kept for short-term momentum context (UI display only)
+      const rsScore20d = (indexChange20d !== null && closes.length >= 21)
         ? Math.round(((price - closes[closes.length - 21]) / closes[closes.length - 21] * 100 - indexChange20d) * 100) / 100
         : null;
+
+      // rsScore60d now identical to rsScore (accurate 63-day, not the broken proxy)
+      const rsScore60d = rsScore;
+
       const divergence  = detectDivergence(closes, rsiVals, 30);
       const srLevels    = findSRLevels(highs, lows, closes, 5);
       const seasonality = bars.length >= 24 ? computeSeasonality(closes, bars.map(b => b.time)) : null;
       const returns_20d = closes.length >= 21
         ? closes.slice(-21).map((c, i, a) => i === 0 ? 0 : Math.round((c - a[i-1]) / a[i-1] * 10000) / 100).slice(1)
         : null;
-
-      // 60-day RS for breakout mode (more robust than 20-day)
-      // NOTE: rsScore60d uses indexChange20d*3 as a rough proxy — actual 60-day index change
-      // is not independently fetched to save API calls.
-      const rsScore60d = (indexChange20d !== null && closes.length >= 61)
-        ? Math.round(((price - closes[closes.length - 61]) / closes[closes.length - 61] * 100
-            - indexChange20d * 3 // rough proxy for 60-day index change
-          ) * 100) / 100
-        : rsScore;
 
       // Average daily volume (20-day) for liquidity normalization
       const avgVolume20d = volumes.slice(-20).reduce((a, b) => a + (b || 0), 0) / 20;
@@ -1021,8 +1330,32 @@ export async function runScreener({ onProgress, symbols, market, investMode, mod
       const near_resistance = srLevels?.resistance?.some(r => r > price && (r - price) / price < 0.03) ?? false;
       const near_support    = srLevels?.support?.some(s => s < price && (price - s) / price < 0.03) ?? false;
 
+      const vwap20 = calcVWAP(highs, lows, closes, volumes, 20);
+
+      // OBV and ATR rank computed before scoreBias so they can influence scoring
+      const obv_trend_pre = calcOBVTrend(closes, volumes, 20);
+      const atr_pct_rank  = calcATRPercentileRank(highs, lows, closes, 14, 252);
+
       const scored = scoreBias(emas, rsiVal, macdData, volData, price, mode, rsScore,
-        { srLevels, avgVolume: avgVolume20d, rsScore60d, isExtended: extension_pct > 25 });
+        { srLevels, avgVolume: avgVolume20d, rsScore60d, isExtended: extension_pct > 25, vwap20,
+          obv_trend: obv_trend_pre, isTasi });
+
+      // ATR rank post-processing: coiling = +1 bonus; overextended = -1 penalty
+      if (atr_pct_rank != null && scored.bias !== 'ERROR' && scored.bias !== 'NO_DATA') {
+        const isBull = ['STRONG BUY', 'BUY', 'WATCH'].includes(scored.bias);
+        const isBear = ['STRONG SELL', 'SELL', 'AVOID'].includes(scored.bias);
+        if ((isBull || isBear) && atr_pct_rank <= 25) {
+          scored.score = Math.min(scored.maxScore, scored.score + 1);
+          (scored.flags = scored.flags || []).push(`ATR coiling (rank ${atr_pct_rank}%) — compressed volatility ✓`);
+          if (isBull) scored.bias = scored.score >= 7 ? 'STRONG BUY' : scored.score >= 5 ? 'BUY' : scored.score >= 3 ? 'WATCH' : 'SKIP';
+          if (isBear) scored.bias = scored.score >= 7 ? 'STRONG SELL' : scored.score >= 5 ? 'SELL' : scored.score >= 3 ? 'AVOID' : 'SKIP';
+        } else if ((isBull || isBear) && atr_pct_rank >= 80 && scored.score >= 4) {
+          scored.score = Math.max(0, scored.score - 1);
+          (scored.warnings = scored.warnings || []).push(`ATR overextended (rank ${atr_pct_rank}%) — late entry risk`);
+          if (isBull) scored.bias = scored.score >= 7 ? 'STRONG BUY' : scored.score >= 5 ? 'BUY' : scored.score >= 3 ? 'WATCH' : 'SKIP';
+          if (isBear) scored.bias = scored.score >= 7 ? 'STRONG SELL' : scored.score >= 5 ? 'SELL' : scored.score >= 3 ? 'AVOID' : 'SKIP';
+        }
+      }
 
       // Market regime penalty: if market is in a downtrend, discount BUY signals
       let regime_discount = 0;
@@ -1066,26 +1399,36 @@ export async function runScreener({ onProgress, symbols, market, investMode, mod
       }
 
       const mfi            = calcMFI(highs, lows, closes, volumes, 14);
-      const obv_trend      = calcOBVTrend(closes, volumes, 20);
+      const obv_trend      = obv_trend_pre; // already computed before scoreBias
       const vol_zscore     = calcVolumeZScore(volumes, 20);
       const whale_score    = calcWhaleScore(mfi, obv_trend, volData.ratio, vol_zscore, scored.bias);
       const vol_compression = calcVolatilityCompression(closes, highs, lows, volumes);
       const rsi_buildup    = calcRsiBuildup(closes, rsiVals);
+      const hurst          = calcHurst(closes);
 
       const change_pct = closes.length >= 2
         ? +((closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100).toFixed(2)
         : null;
 
       const result = { sym, name, ar: ar || null, price, change_pct, emas, rsi: rsiVal, macd_hist: macdData?.hist,
-        vol_ratio: volData.ratio, atr: atrVal, rs_score: rsScore, divergence, sr: srLevels,
+        vol_ratio: volData.ratio, atr: atrVal, rs_score: rsScore, rs_score_20d: rsScore20d, divergence, sr: srLevels,
         seasonality, returns_20d, weekly, mfi, obv_trend, vol_zscore, whale_score,
         vol_compression, rsi_buildup,
+        hurst, atr_pct_rank,
+        vwap20: vwap20 != null ? +vwap20.toFixed(4) : null,
+        above_vwap: vwap20 != null ? price > vwap20 : null,
         // New risk fields
         market_regime: marketRegime,
         regime_discount, regime_score, regime_bias,
         extension_pct, near_resistance, near_support,
         avg_volume: Math.round(avgVolume20d),
+        composite: Math.round((scored.score || 0) / (scored.maxScore || 9) * 100),
         ...scored };
+      // Style tags computed after full result is assembled
+      result.style_tags = computeStyleTags(result);
+      // Pattern recognition and conviction score (both need full result + market regime in scope)
+      result.patterns = detectPatterns(closes, highs, lows, volumes, atrVal, avgVolume20d);
+      result.conviction_score = computeConviction(result, marketRegime);
       if (onProgress) onProgress(++completed, stockList.length, result);
       return result;
 
