@@ -3,28 +3,29 @@
  * Usage: node dashboard/server.mjs
  */
 
+// Load .env from repo root (graceful: no error if missing or dotenv not installed)
+try { const { createRequire } = await import('node:module'); createRequire(import.meta.url)('dotenv').config({ path: new URL('../.env', import.meta.url).pathname }); } catch (_) {}
+
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import CDP from "chrome-remote-interface";
 import { getRules, updateRules } from "../src/rules-engine.js";
-import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals } from "./db.js";
+import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, accuracyLab } from "./db.js";
 import * as dataCore from "../src/core/data.js";
-import Anthropic from "@anthropic-ai/sdk";
-import { runBacktest } from "./backtest.mjs";
+import { runBacktest, sweepParams, simulatePortfolio, prepareIndicators, simulateTrades } from "./backtest.mjs";
 import { runScreener, getUniverseByMarket, TASI_STOCKS, US_EQUITY_STOCKS, ETF_STOCKS, CRYPTO_STOCKS, COMMODITY_STOCKS, INDEX_FOR_MARKET, emaArray, calcRsi, atrCalc, rsiSeries, macdHist, volumeCheck, scoreBias, findSRLevels, detectDivergence, computeSeasonality, toYahooSym, fetchYahooOHLCV } from "../scripts/tasi_screener.mjs";
-import { runBrief } from "../src/core/morning.js";
 import { getFundamentals, scoreFundamentals } from "./fundamentals.mjs";
 import { getShariaStatus, getAllStatuses } from "./sharia.mjs";
 import * as chartCore from "../src/core/chart.js";
 import { create as createAlert } from "../src/core/alerts.js";
+import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
 const SCAN_CACHE     = join(__dirname, "scan-cache.json");
 const PREV_SCAN_CACHE= join(__dirname, "prev-scan-cache.json");
-const BRIEF_CACHE    = join(__dirname, "brief-cache.json");
 const RULES_PATH     = resolve(__dirname, "../rules.json");
 const UNIVERSE_PATH   = join(__dirname, "universe.json");
 const SETTINGS_PATH   = join(__dirname, "settings.json");
@@ -54,46 +55,6 @@ async function sendTelegram(token, chatId, text) {
     });
     return r.json();
   } catch (e) { return { ok: false, description: e.message }; }
-}
-
-// ── Claude AI Analysis ────────────────────────────────────────────────────────
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-async function getClaudeAnalysis(data) {
-  const { name, sym, bias, score, maxScore, price, emas, rsi, macd_hist, vol_ratio, atr, rs_score, weekly, sharia, mode } = data;
-  const isBear = ["STRONG SELL","SELL","AVOID"].includes(bias);
-  const stop  = atr ? (isBear ? price + 1.5*atr : price - 1.5*atr) : null;
-  const tgt1  = atr ? (isBear ? price - 1.5*atr : price + 1.5*atr) : null;
-  const tgt2  = atr ? (isBear ? price - 3*atr   : price + 3*atr)   : null;
-  const fmt   = v => v?.toFixed(2) ?? "N/A";
-
-  const prompt = `You are a professional technical analyst reviewing a trading signal. Be specific, reference the actual numbers, no generic advice.
-
-Stock: ${name} (${sym})
-Signal: ${bias} | Score: ${score}/${maxScore} | Mode: ${mode === 'position' ? 'Long-Term (Daily + Weekly)' : mode === 'breakout' ? 'Breakout Hunter (Volume + RS)' : 'Short-Term Swing (Daily)'}
-
-Technical data:
-- Price: ${fmt(price)} | ATR(14): ${fmt(atr)}
-- EMA stack: ${emas?.ema13 > emas?.ema34 && emas?.ema34 > emas?.ema89 ? "✓ Aligned (13>34>89)" : "✗ Not aligned"} | Above EMA 200: ${price > emas?.ema200 ? "✓" : "✗"} (200 EMA: ${fmt(emas?.ema200)})
-- RSI(14): ${rsi?.toFixed(1) ?? "N/A"} | MACD histogram: ${macd_hist?.toFixed(4) ?? "N/A"} (${macd_hist > 0 ? "positive" : "negative"})
-- Volume: ${vol_ratio}× average | RS vs index: ${rs_score != null ? (rs_score > 0 ? "+" : "") + rs_score + "%" : "N/A"}
-${weekly ? `- Weekly EMA stack: ${weekly.ema_stack ? "✓" : "✗"} | Weekly above EMA 200: ${weekly.above200 == null ? "N/A" : weekly.above200 ? "✓" : "✗"} (${weekly.score}/4 pts)` : ""}
-- Trade levels: Stop ${fmt(stop)} | Target 1 ${fmt(tgt1)} | Target 2 ${fmt(tgt2)}
-${sharia ? `- Sharia: ${sharia.status} — ${sharia.basis}` : ""}
-
-Write exactly 3 short paragraphs (no headers, no bullets):
-1. WHY this signal is forming — what specific combination of indicators is creating this setup
-2. KEY RISKS — what specific levels or conditions would invalidate this setup
-3. TIMING — whether to enter now or wait, and what confirmation to look for
-
-Max 130 words total. Be precise about prices and levels.`;
-
-  const msg = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 280,
-    messages: [{ role: "user", content: prompt }],
-  });
-  return msg.content[0].text;
 }
 
 // ── Market Regime ─────────────────────────────────────────────────────────────
@@ -169,6 +130,35 @@ async function getEarningsCalendar(sym) {
     const d = await r.json();
     return d?.earningsCalendar?.[0] || null;
   } catch (_) { return null; }
+}
+
+// ── Google News RSS ────────────────────────────────────────────────────────────
+const newsCache = new Map();
+const NEWS_TTL  = 30 * 60 * 1000;
+
+async function fetchGoogleNews(query, hl = 'en', gl = 'SA', ceid = 'SA:en') {
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return [];
+  const xml = await res.text();
+  const items = [];
+  const re = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const block = m[1];
+    const title   = (block.match(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/) || block.match(/<title>([^<]+)<\/title>/))?.[1]?.trim() || '';
+    const link    = block.match(/<link>([^<]+)<\/link>/)?.[1]?.trim() || block.match(/<guid[^>]*>([^<]+)<\/guid>/)?.[1]?.trim() || '';
+    const pubDate = block.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1]?.trim() || '';
+    const source  = (block.match(/<source[^>]*>([^<]+)<\/source>/) || block.match(/<source[^>]*\/?>/))?.[1]?.trim() || '';
+    if (title && link) {
+      items.push({ title, url: link, source, published: pubDate, lang: hl === 'ar' ? 'ar' : 'en' });
+      if (items.length >= 8) break;
+    }
+  }
+  return items;
 }
 
 // ── Macro Calendar ────────────────────────────────────────────────────────────
@@ -254,58 +244,6 @@ function getUpcomingEvents(daysAhead = 21) {
     .filter(e => e.date >= todayStr && e.date <= endDate)
     .sort((a, b) => a.date.localeCompare(b.date));
 }
-
-// Claude macro brief — cached for 24h per date
-const MACRO_BRIEF_CACHE_PATH = join(__dirname, 'macro_brief_cache.json');
-let macroBriefCache = { date: null, brief: null };
-
-function loadMacroBriefCache() {
-  try {
-    if (existsSync(MACRO_BRIEF_CACHE_PATH))
-      macroBriefCache = JSON.parse(readFileSync(MACRO_BRIEF_CACHE_PATH, 'utf8'));
-  } catch (_) {}
-}
-
-async function getMacroBrief(forceRefresh = false) {
-  const todayStr = new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10);
-  if (!forceRefresh && macroBriefCache.date === todayStr && macroBriefCache.brief) {
-    return macroBriefCache.brief;
-  }
-
-  const upcoming = getUpcomingEvents(14);
-  const eventList = upcoming.length
-    ? upcoming.map(e => `${e.date}: ${e.label} (${e.impact} impact)`).join('\n')
-    : 'No major scheduled events in the next 14 days.';
-
-  const prompt = `You are a macro analyst writing a single-sentence daily briefing for Saudi TASI equity traders.
-
-Today: ${todayStr} (Saudi time)
-Upcoming macro events (next 14 days):
-${eventList}
-
-Write ONE concise sentence (max 40 words) that:
-1. Names the most market-moving event in the window
-2. States whether the current macro backdrop is broadly risk-on or risk-off for TASI
-3. Gives ONE specific thing traders should watch
-
-No preamble. No "Note:". Just the sentence.`;
-
-  try {
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 120,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const brief = msg.content[0]?.text?.trim() || '';
-    macroBriefCache = { date: todayStr, brief };
-    try { writeFileSync(MACRO_BRIEF_CACHE_PATH, JSON.stringify(macroBriefCache, null, 2)); } catch (_) {}
-    return brief;
-  } catch (e) {
-    return `Macro brief unavailable: ${e.message}`;
-  }
-}
-
-loadMacroBriefCache();
 
 // ── SSE broadcast ─────────────────────────────────────────────────────────────
 const sseClients = new Set();
@@ -423,6 +361,58 @@ async function captureScreenshot(filename) {
 const BIAS_RANK = { "STRONG BUY":0,"BUY":1,"WATCH":2,"SKIP":3,"AVOID":4,"SELL":5,"STRONG SELL":6 };
 const BEAR_BIASES = new Set(["STRONG SELL","SELL","AVOID"]);
 
+// ── Signal Label Resolution ───────────────────────────────────────────────────
+// Maps raw STRONG SELL bias to a context-aware label.
+// STRONG BUY is unchanged — it is unambiguous in all markets.
+// regime: 'bull' | 'neutral' | 'bear'
+// isHolding: boolean — whether the user has an active position in this sym
+function resolveSignalLabel(bias, regime, isHolding) {
+  if (bias !== 'STRONG SELL') return bias;
+  if (isHolding) {
+    return regime === 'bear' ? 'EXIT NOW' : 'EXIT';
+  }
+  return regime === 'bear' ? 'AVOID' : 'SKIP';
+}
+
+// ── Score velocity: 3-scan linear regression slope ────────────────────────────
+function computeVelocity(hist) {
+  const pts = hist.slice(-3).map(h => h.s);
+  if (pts.length < 2) return { slope: 0, direction: 'stable' };
+  const n = pts.length, mx = (n - 1) / 2;
+  const my = pts.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  pts.forEach((v, i) => { num += (i - mx) * (v - my); den += (i - mx) ** 2; });
+  const slope = den ? +(num / den).toFixed(2) : 0;
+  const direction = slope >= 0.5 ? 'rising' : slope <= -0.5 ? 'falling' : 'stable';
+  return { slope, direction };
+}
+
+// ── Sector classifier (rule-based, TASI code ranges) ─────────────────────────
+function sectorOf(sym) {
+  const m = sym.match(/(\d+)$/);
+  if (!m) {
+    if (sym.includes('BTC') || sym.includes('ETH') || sym.includes('XRP')) return 'Crypto';
+    if (sym.includes('TVC:') || sym.includes('NYMEX:') || sym.includes('COMEX:')) return 'Commodity';
+    return 'US Equity';
+  }
+  const c = parseInt(m[1]);
+  if (c >= 1010 && c <= 1180 && c < 1200) return 'Banking';
+  if (c === 2222 || c === 2381 || c === 2382) return 'Energy';
+  if ([2080,2082,2083,5110].includes(c)) return 'Utilities';
+  if ([4007,4004,2160,4013,4005,4017,4341,4009,4338].includes(c)) return 'Healthcare';
+  if ([4300,4310,4150,4323].includes(c)) return 'Real Estate';
+  if ([4110,4040,4261,4262,4263,4264].includes(c)) return 'Transport';
+  if ([2280,2050,6002,2281,6070,2270,2100].includes(c) || (c >= 6001 && c <= 6099)) return 'Food & Agri';
+  if (c >= 7000 && c <= 7299) return 'Telecom & Tech';
+  if (c >= 8000 && c <= 8300) return 'Insurance';
+  if (c >= 3000 && c <= 3199) return 'Cement';
+  if ([4190,4180,4003,4200,4260,4001,4006,4050,4051,4163,4240].includes(c)) return 'Retail';
+  if (c >= 2010 && c <= 2399) return 'Petrochem';
+  if (c >= 1200 && c <= 1330) return 'Industrial';
+  if (c >= 1800 && c <= 1840) return 'Consumer';
+  return 'Other';
+}
+
 function getCritPasses(r) {
   const { ema13, ema34, ema89, ema200 } = r.emas || {};
   const bear = BEAR_BIASES.has(r.bias);
@@ -432,6 +422,7 @@ function getCritPasses(r) {
     rsi:      bear ? (r.rsi > 22 && r.rsi <= 48) : (r.rsi >= 52 && r.rsi < 78),
     macd:     bear ? r.macd_hist < 0 : r.macd_hist > 0,
     vol:      r.vol_ratio >= 1.2,
+    vwap:     r.above_vwap != null ? (bear ? !r.above_vwap : r.above_vwap) : false,
   };
 }
 
@@ -441,6 +432,7 @@ const CRIT_LABELS = {
   rsi:      { pts: 2, bull: "RSI in momentum zone (52–78)", bear: "RSI in weak zone (22–48)" },
   macd:     { pts: 1, bull: "MACD histogram positive",      bear: "MACD histogram negative" },
   vol:      { pts: 1, bull: "Volume above 1.2×",            bear: "Volume above 1.2×" },
+  vwap:     { pts: 1, bull: "Price above 20-day VWAP",      bear: "Price below 20-day VWAP" },
 };
 
 function computeDelta(newResults, prevResults) {
@@ -523,7 +515,6 @@ const DEFAULT_UNIVERSE = {
 // ── In-memory state ───────────────────────────────────────────────────────────
 const state = {
   scan:      { running: false, progress: 0, total: 0, results: [], lastRun: null, error: null, delta: [], currentMarket: "tasi", mode: 'swing', investMode: false, quickScan: false, quickSkipped: 0 },
-  brief:     { running: false, results: null, lastRun: null, error: null },
   universe:  {},
   settings:  {},
   positions: {},
@@ -567,6 +558,38 @@ function updateScoreHistory(results) {
     state.score_history[r.sym].push(entry);
     state.score_history[r.sym] = state.score_history[r.sym].slice(-15);
   });
+}
+
+function autoLogAccuracySignals(results) {
+  // After each scan, log STRONG BUY/SELL signals (score ≥7) for accuracy tracking
+  // Also check if any active signals have hit their price targets
+  try {
+    accuracyLab.checkPriceOutcomes(results);
+    accuracyLab.checkAndExpire();
+    const strongSignals = results.filter(r =>
+      (r.bias === 'STRONG BUY' || r.bias === 'STRONG SELL') && r.score >= 7 && r.atr
+    );
+    for (const r of strongSignals) {
+      const isBear = r.bias === 'STRONG SELL';
+      const stop = r.atr ? (isBear ? r.price + 1.5 * r.atr : r.price - 1.5 * r.atr) : null;
+      const t1   = r.atr ? (isBear ? r.price - 1.5 * r.atr : r.price + 1.5 * r.atr) : null;
+      const t2   = r.atr ? (isBear ? r.price - 3 * r.atr   : r.price + 3 * r.atr)   : null;
+      const market = r.sym.startsWith('TADAWUL:') ? 'tasi'
+                   : r.sym.includes('USD') ? 'crypto'
+                   : ['TVC:','NYMEX:','COMEX:'].some(p=>r.sym.startsWith(p)) ? 'commodity' : 'us';
+      accuracyLab.log({
+        sym: r.sym, name: r.name,
+        price_entry: r.price, price_stop: stop, price_t1: t1, price_t2: t2,
+        bias: r.bias, score: r.score, max_score: r.maxScore || 9,
+        composite: r.composite || Math.round(r.score / (r.maxScore || 9) * 100),
+        scan_mode: state.scan.mode || 'swing',
+        style_tags: r.style_tags || [],
+        market, sector: null,
+        hurst: r.hurst, atr_rank: r.atr_pct_rank,
+        rsi_entry: r.rsi, vol_ratio_entry: r.vol_ratio,
+      });
+    }
+  } catch (e) { console.warn('[lab] auto-log error:', e.message); }
 }
 
 function loadAlertRules() {
@@ -616,9 +639,7 @@ function loadCaches() {
   if (existsSync(SCAN_CACHE)) {
     try { const c = JSON.parse(readFileSync(SCAN_CACHE, "utf8")); state.scan.results = c.results || []; state.scan.lastRun = c.scanned_at || null; } catch (_) {}
   }
-  if (existsSync(BRIEF_CACHE)) {
-    try { const c = JSON.parse(readFileSync(BRIEF_CACHE, "utf8")); state.brief.results = c; state.brief.lastRun = c.generated_at || null; } catch (_) {}
-  }
+
 }
 loadCaches();
 loadUniverse();
@@ -1122,6 +1143,9 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
       }
       broadcastSSE({ type: "scan_complete", count: results.length, lastRun: state.scan.lastRun, quickScan: state.scan.quickScan, quickSkipped: state.scan.quickSkipped });
 
+      // Refresh CMA filings after each full scan (rate-limited to 4h inside the function)
+      if (!state.scan.quickScan) fetchAndStoreCMAFilings().catch(() => {});
+
       // Compute delta vs previous scan
       try {
         const prev = existsSync(PREV_SCAN_CACHE) ? JSON.parse(readFileSync(PREV_SCAN_CACHE, "utf8")) : null;
@@ -1152,6 +1176,10 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
       // Score history + smart alert rules
       updateScoreHistory(state.scan.results);
       checkAlertRules(state.scan.results);
+      autoLogAccuracySignals(state.scan.results);
+
+      // Generate top opportunities analysis (async, non-blocking)
+      if (!state.scan.quickScan) generateTopOpportunities(state.scan.results).catch(() => {});
 
     } catch (err) {
       state.scan.error = err.message;
@@ -1163,28 +1191,9 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
   return { ok: true, message: symbols ? `Scanning ${symbols.length} stocks` : "Scanning all stocks" };
 }
 
-function startBrief() {
-  if (state.brief.running) return { ok: false, message: "Brief already running" };
-  state.brief.running = true;
-  state.brief.error = null;
-  (async () => {
-    try {
-      const result = await runBrief();
-      state.brief.results = result;
-      state.brief.lastRun = new Date().toISOString();
-      writeFileSync(BRIEF_CACHE, JSON.stringify(result, null, 2));
-    } catch (err) {
-      state.brief.error = err.message;
-    } finally {
-      state.brief.running = false;
-    }
-  })();
-  return { ok: true, message: "Brief started" };
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function json(res, data, status = 200) {
-  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
   res.end(JSON.stringify(data));
 }
 
@@ -1196,18 +1205,217 @@ function html(res, filePath) {
   } catch { res.writeHead(404); res.end("Not found"); }
 }
 
-function readBody(req) {
-  return new Promise((resolve) => {
-    let body = "";
-    req.on("data", c => body += c);
-    req.on("end", () => {
-      try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); }
+function readBody(req, maxBytes = 1_000_000) {
+  return new Promise((resolve, reject) => {
+    let body = "", size = 0;
+    req.on("data", c => {
+      size += c.length;
+      if (size > maxBytes) { req.destroy(); return reject(new Error('Request body too large')); }
+      body += c;
     });
+    req.on("end", () => { try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); } });
   });
+}
+
+// ── Google OAuth config (set in .env) ─────────────────────────────────────────
+const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const OAUTH_REDIRECT_BASE  = process.env.OAUTH_REDIRECT_BASE || `http://localhost:${process.env.PORT || 3000}`;
+
+// ── Login rate limiter (in-memory, per-IP, 5 attempts / 60s) ─────────────────
+const _loginAttempts = new Map();
+function loginRateLimited(ip) {
+  const now = Date.now(), window = 60_000, limit = 5;
+  const rec = _loginAttempts.get(ip) || { count: 0, resetAt: now + window };
+  if (now > rec.resetAt) { rec.count = 0; rec.resetAt = now + window; }
+  rec.count++;
+  _loginAttempts.set(ip, rec);
+  return rec.count > limit;
+}
+
+// ── One-time OAuth code store (code → { jwt, exp }) ─────────────────────────
+const _oauthCodes = new Map();
+function issueOAuthCode(jwt) {
+  const code = crypto.randomUUID();
+  _oauthCodes.set(code, { jwt, exp: Date.now() + 30_000 }); // 30-second TTL
+  return code;
+}
+function redeemOAuthCode(code) {
+  const entry = _oauthCodes.get(code);
+  if (!entry) return null;
+  _oauthCodes.delete(code);
+  if (Date.now() > entry.exp) return null;
+  return entry.jwt;
+}
+
+// ── Auth route handler ────────────────────────────────────────────────────────
+async function handleAuthRoute(req, res, path, method, url) {
+  const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || `http://localhost:${PORT}`;
+  const CORS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGIN };
+
+  function ok(data, status = 200) {
+    res.writeHead(status, CORS);
+    res.end(JSON.stringify(data));
+  }
+  function fail(msg, status = 400) {
+    res.writeHead(status, CORS);
+    res.end(JSON.stringify({ error: msg }));
+  }
+  function redirect(location) {
+    res.writeHead(302, { Location: location });
+    res.end();
+  }
+
+  // POST /auth/register
+  if (path === '/auth/register' && method === 'POST') {
+    if (!process.env.ALLOW_REGISTRATION) return fail('Registration is disabled. Set ALLOW_REGISTRATION=true in .env to enable.', 403);
+    const body = await readBody(req);
+    const { email, username, password, display_name } = body;
+    if (!password || password.length < 8) return fail('Password must be at least 8 characters.');
+    if (!email && !username) return fail('Email or username is required.');
+    if (email && authUsers.byEmail(email)) return fail('Email already registered.');
+    if (username && authUsers.byUsername(username)) return fail('Username already taken.');
+    const password_hash = await hashPassword(password);
+    const id = authUsers.create({ email: email || null, username: username || null, password_hash, display_name: display_name || username || email?.split('@')[0] || 'User', provider: 'local' });
+    authUsers.touchLogin(id);
+    const token = signJWT({ sub: id, email, username });
+    return ok({ token, user: authUsers.safeView(authUsers.byId(id)) }, 201);
+  }
+
+  // POST /auth/login
+  if (path === '/auth/login' && method === 'POST') {
+    const ip = req.socket.remoteAddress || 'unknown';
+    if (loginRateLimited(ip)) return fail('Too many login attempts. Try again in a minute.', 429);
+    const body = await readBody(req);
+    const { identifier, password } = body;
+    if (!identifier || !password) return fail('Identifier and password are required.');
+    const user = authUsers.byIdentifier(identifier);
+    if (!user || !user.password_hash) return fail('Invalid credentials.', 401);
+    const ok2 = await verifyPassword(password, user.password_hash);
+    if (!ok2) return fail('Invalid credentials.', 401);
+    authUsers.touchLogin(user.id);
+    const token = signJWT({ sub: user.id, email: user.email, username: user.username });
+    return ok({ token, user: authUsers.safeView(user) });
+  }
+
+  // GET /auth/me
+  if (path === '/auth/me' && method === 'GET') {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return fail('No token', 401);
+    let payload;
+    try { payload = verifyJWT(token); } catch { return fail('Token invalid or expired', 401); }
+    const user = authUsers.byId(payload.sub);
+    if (!user) return fail('User not found', 404);
+    return ok({ user: authUsers.safeView(user) });
+  }
+
+  // PATCH /auth/profile
+  if (path === '/auth/profile' && method === 'PATCH') {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return fail('No token', 401);
+    let payload;
+    try { payload = verifyJWT(token); } catch { return fail('Token invalid or expired', 401); }
+    const body = await readBody(req);
+    const { display_name, avatar_url, username } = body;
+    if (username && username !== authUsers.byId(payload.sub)?.username) {
+      if (authUsers.byUsername(username)) return fail('Username already taken.');
+    }
+    authUsers.updateProfile(payload.sub, { display_name, avatar_url, username });
+    return ok({ user: authUsers.safeView(authUsers.byId(payload.sub)) });
+  }
+
+  // POST /auth/logout — stateless JWT; client clears token
+  if (path === '/auth/logout' && method === 'POST') {
+    return ok({ ok: true });
+  }
+
+  // GET /auth/google — redirect to Google consent page
+  if (path === '/auth/google' && method === 'GET') {
+    if (!GOOGLE_CLIENT_ID) return fail('Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env', 503);
+    const params = new URLSearchParams({
+      client_id:     GOOGLE_CLIENT_ID,
+      redirect_uri:  `${OAUTH_REDIRECT_BASE}/auth/google/callback`,
+      response_type: 'code',
+      scope:         'openid email profile',
+      access_type:   'online',
+      prompt:        'select_account',
+    });
+    return redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+  }
+
+  // GET /auth/google/callback — exchange code, create/find user, issue JWT
+  if (path === '/auth/google/callback' && method === 'GET') {
+    const code = url.searchParams.get('code');
+    if (!code) return fail('Missing code from Google', 400);
+    try {
+      // Exchange code for tokens
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code, client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${OAUTH_REDIRECT_BASE}/auth/google/callback`,
+          grant_type: 'authorization_code',
+        }),
+      });
+      const tokens = await tokenRes.json();
+      if (!tokens.access_token) throw new Error(tokens.error_description || 'Token exchange failed');
+
+      // Get user info
+      const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      const gUser = await infoRes.json();
+      if (!gUser.sub) throw new Error('Failed to get Google user info');
+
+      // Find or create user
+      let user = authUsers.byProvider('google', gUser.sub);
+      if (!user) {
+        // Check if email already exists (link accounts)
+        user = gUser.email ? authUsers.byEmail(gUser.email) : null;
+        if (user) {
+          // Link Google to existing account
+          const { db } = await import('./db.js');
+          db.prepare('UPDATE users SET provider=?,provider_id=?,avatar_url=COALESCE(avatar_url,?) WHERE id=?')
+            .run('google', gUser.sub, gUser.picture || null, user.id);
+          user = authUsers.byId(user.id);
+        } else {
+          const id = authUsers.create({
+            email: gUser.email || null,
+            username: null,
+            display_name: gUser.name || gUser.email?.split('@')[0] || 'User',
+            avatar_url: gUser.picture || null,
+            provider: 'google',
+            provider_id: gUser.sub,
+          });
+          user = authUsers.byId(id);
+        }
+      }
+      authUsers.touchLogin(user.id);
+      const jwt = signJWT({ sub: user.id, email: user.email, username: user.username });
+      // Use a short-lived one-time code so the JWT never appears in logs or browser history
+      const code = issueOAuthCode(jwt);
+      return redirect(`/?auth_code=${encodeURIComponent(code)}`);
+    } catch (e) {
+      return redirect(`/?auth_error=${encodeURIComponent(e.message)}`);
+    }
+  }
+
+  // POST /auth/exchange — redeem a one-time OAuth code for a JWT
+  if (path === '/auth/exchange' && method === 'POST') {
+    const body = await readBody(req);
+    const jwt = redeemOAuthCode(body.code || '');
+    if (!jwt) return fail('Invalid or expired code.', 401);
+    return ok({ token: jwt });
+  }
+
+  return fail('Not found', 404);
 }
 
 // ── Server ────────────────────────────────────────────────────────────────────
 const server = createServer(async (req, res) => {
+  try {
   const url    = new URL(req.url, `http://localhost:${PORT}`);
   const path   = url.pathname;
   const method = req.method;
@@ -1218,12 +1426,33 @@ const server = createServer(async (req, res) => {
   }
 
   if (path === "/" || path === "/index.html") return html(res, join(__dirname, "index.html"));
+  if (path === "/landing" || path === "/landing.html") return html(res, resolve(__dirname, "../landing.html"));
 
-  // Auth — protect all /api/* routes when DASHBOARD_API_KEY is set
-  if (API_KEY && path.startsWith('/api/')) {
+  // ── Auth routes (public — no API key needed) ─────────────────────────────────
+  if (path.startsWith('/auth/')) {
+    return handleAuthRoute(req, res, path, method, url);
+  }
+
+  // ── Protect /api/* routes ────────────────────────────────────────────────────
+  if (path.startsWith('/api/')) {
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.headers['x-api-key'] || '');
-    if (token !== API_KEY) {
+    let authorized = false;
+
+    // 1. Accept legacy API key
+    if (API_KEY && token === API_KEY) {
+      authorized = true;
+    }
+    // 2. Accept JWT from the new user auth
+    if (!authorized && token) {
+      try { req.currentUser = verifyJWT(token); authorized = true; } catch {}
+    }
+    // 3. If no API key is configured and no JWT, allow (dev mode)
+    if (!authorized && !API_KEY) {
+      authorized = true;
+    }
+
+    if (!authorized) {
       res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       return res.end(JSON.stringify({ error: 'Unauthorized' }));
     }
@@ -1233,13 +1462,16 @@ const server = createServer(async (req, res) => {
   if (path === "/api/status" && method === "GET") {
     return json(res, {
       scan:  { running: state.scan.running, progress: state.scan.progress, total: state.scan.total, count: state.scan.results.length, lastRun: state.scan.lastRun, error: state.scan.error, mode: state.scan.mode || 'swing' },
-      brief: { running: state.brief.running, lastRun: state.brief.lastRun, error: state.brief.error },
     });
   }
 
   // Scan
   if (path === "/api/scan/results" && method === "GET") {
-    return json(res, { scanned_at: state.scan.lastRun, running: state.scan.running, progress: state.scan.progress, total: state.scan.total, mode: state.scan.mode || 'swing', results: state.scan.results });
+    const results = (state.scan.results || []).map(r => {
+      const hist = state.score_history[r.sym] || [];
+      return { ...r, velocity: computeVelocity(hist), sector: sectorOf(r.sym) };
+    });
+    return json(res, { scanned_at: state.scan.lastRun, running: state.scan.running, progress: state.scan.progress, total: state.scan.total, mode: state.scan.mode || 'swing', results });
   }
   if (path === "/api/scan/start" && method === "POST") {
     const body = await readBody(req);
@@ -1310,14 +1542,6 @@ const server = createServer(async (req, res) => {
     return json(res, { ok: true });
   }
 
-  // Brief
-  if (path === "/api/brief/results" && method === "GET") {
-    return json(res, state.brief.results || { symbols_scanned: [], rules: {} });
-  }
-  if (path === "/api/brief/start" && method === "POST") {
-    return json(res, startBrief());
-  }
-
   // Rules — GET
   if (path === "/api/rules" && method === "GET") {
     try {
@@ -1344,9 +1568,8 @@ const server = createServer(async (req, res) => {
     if (!sym) return json(res, { error: "sym param required" }, 400);
     try {
       const data  = await getFundamentals(sym);
-      const sector = sym.includes("1010") || sym.includes("1020") || sym.includes("1030") ||
-                     sym.includes("1050") || sym.includes("1060") || sym.includes("1070") ||
-                     sym.includes("1080") ? "banking" : "general";
+      const _symCode = parseInt((sym.split(':')[1] || sym).replace(/\D/g, '')) || 0;
+      const sector = (_symCode >= 1010 && _symCode <= 1080) ? "banking" : "general";
       const score = scoreFundamentals(data, sector);
       return json(res, { success: true, data, score });
     } catch (err) { return json(res, { success: false, error: err.message }, 502); }
@@ -1406,27 +1629,55 @@ const server = createServer(async (req, res) => {
     return json(res, { matrix, syms: rows.map(r => r.sym), names: rows.map(r => r.name) });
   }
 
-  // Claude AI analysis
-  if (path === "/api/analyze" && method === "POST") {
-    const body = await readBody(req);
-    if (!process.env.ANTHROPIC_API_KEY) return json(res, { error: "ANTHROPIC_API_KEY not set" }, 400);
-    try {
-      const text = await getClaudeAnalysis({ ...body, mode: state.scan.mode || 'swing' });
-      return json(res, { success: true, text });
-    } catch (err) { return json(res, { success: false, error: err.message }, 500); }
-  }
-
   // Backtest
   if (path === "/api/backtest" && method === "POST") {
+    const body = await readBody(req);
+    const { sym, minScore = 7, holdBars = 40 } = body;
+    if (!sym) return json(res, { error: "sym required" }, 400);
+    try {
+      const yahooSym = toYahooSym(sym);
+      const bars     = await fetchYahooOHLCV(yahooSym, '1d', 2000);
+      if (!bars || bars.length < 210) return json(res, { error: `Not enough data for ${sym} (got ${bars?.length ?? 0} bars)` }, 400);
+      const result = runBacktest(bars, { minScore: +minScore, holdBars: +holdBars });
+      return json(res, { ...result, barCount: bars.length });
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+
+  if (path === "/api/backtest/sweep" && method === "POST") {
     const body = await readBody(req);
     const { sym } = body;
     if (!sym) return json(res, { error: "sym required" }, 400);
     try {
-      await chartCore.setSymbol({ symbol: sym });
-      await new Promise(r => setTimeout(r, 1000));
-      const ohlcv = await dataCore.getOhlcv({ count: 500 });
-      const result = runBacktest(ohlcv.bars || [], { minScore: 7, holdBars: 40 });
-      return json(res, result);
+      const yahooSym = toYahooSym(sym);
+      const bars     = await fetchYahooOHLCV(yahooSym, '1d', 2000);
+      if (!bars || bars.length < 210) return json(res, { error: `Not enough data for ${sym}` }, 400);
+      const sweep = sweepParams(bars);
+      return json(res, { sweep, barCount: bars.length });
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+
+  if (path === "/api/backtest/portfolio" && method === "POST") {
+    const body = await readBody(req);
+    const { market = 'tasi', minScore = 6, holdBars = 40, maxPositions = 5 } = body;
+    try {
+      const universe = getUniverseByMarket(market).slice(0, 30); // cap at 30 to limit fetch time
+      const allTrades = [];
+      let fetched = 0;
+      for (const entry of universe) {
+        const sym = typeof entry === 'object' ? entry.sym : entry;
+        try {
+          const yahoo = toYahooSym(sym);
+          const bars  = await fetchYahooOHLCV(yahoo, '1d', 2000);
+          if (!bars || bars.length < 210) continue;
+          const ind    = prepareIndicators(bars);
+          const trades = simulateTrades(ind, bars, { minScore: +minScore, holdBars: +holdBars });
+          trades.forEach(t => allTrades.push({ sym, ...t }));
+          fetched++;
+          await new Promise(r => setTimeout(r, 150)); // rate-limit Yahoo
+        } catch(_) {}
+      }
+      const result = simulatePortfolio(allTrades, { capital: 100000, maxPositions: +maxPositions });
+      return json(res, { ...result, symbolsFetched: fetched, market });
     } catch (err) { return json(res, { error: err.message }, 500); }
   }
 
@@ -1450,7 +1701,7 @@ const server = createServer(async (req, res) => {
   // Live mode
   if (path === "/api/live/start" && method === "POST") {
     const body = await readBody(req);
-    liveInterval = body.interval || 10;
+    liveInterval = Math.max(1, parseInt(body.interval) || 10);
     if (liveTimer) clearInterval(liveTimer);
     liveTimer = setInterval(() => {
       if (!state.scan.running) startScan(null, state.scan.currentMarket || "tasi", state.scan.mode || 'swing');
@@ -1507,6 +1758,21 @@ const server = createServer(async (req, res) => {
       const q = await dataCore.getQuote({});
       return json(res, q);
     } catch (err) { return json(res, { success: false, error: err.message }, 502); }
+  }
+
+  // OHLCV for native chart (1 year daily by default)
+  if (path === "/api/ohlcv" && method === "GET") {
+    const sym   = url.searchParams.get("sym");
+    const count = Math.min(parseInt(url.searchParams.get("count") || "252"), 500);
+    if (!sym) return json(res, { error: "sym required" }, 400);
+    const yahooSym = toYahooSym(sym);
+    if (!yahooSym) return json(res, { error: "unknown symbol" }, 400);
+    try {
+      const bars = await fetchYahooOHLCV(yahooSym, '1d', count);
+      return json(res, { success: true, sym, bars });
+    } catch(err) {
+      return json(res, { success: false, error: err.message }, 500);
+    }
   }
 
   // Chart screenshot
@@ -1911,16 +2177,106 @@ const server = createServer(async (req, res) => {
     return json(res, getAllStatuses());
   }
 
-  // Macro calendar + brief
+  // Macro calendar
   if (path === "/api/macro/events" && method === "GET") {
     const days = parseInt(url.searchParams.get("days") || "21");
     return json(res, { events: getUpcomingEvents(days) });
   }
-  if (path === "/api/macro/brief" && method === "GET") {
-    const force = url.searchParams.get("refresh") === "1";
-    const brief = await getMacroBrief(force);
-    const todayStr = new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10);
-    return json(res, { brief, date: todayStr, cached: macroBriefCache.date === todayStr });
+
+  if (path === "/api/opportunities" && method === "GET") {
+    const minConv = parseInt(url.searchParams.get('min') || '30');
+    const limit   = parseInt(url.searchParams.get('limit') || '20');
+    dbOppSignals.expireOld();
+    const rows = dbOppSignals.getActive(minConv, limit);
+    const opportunities = rows.map(r => ({
+      id: r.id, sym: r.sym, name: r.payload.name || r.name,
+      signal_type: r.signal_type, conviction: r.conviction,
+      confluence: r.payload.confluence || 1,
+      headline: r.payload.headline, note: r.payload.note,
+      price: r.payload.price, score: r.payload.score, maxScore: r.payload.maxScore,
+      bias: r.payload.bias, regime: r.payload.regime,
+      stop: r.payload.stop, target1: r.payload.target1, target2: r.payload.target2,
+      rsi: r.payload.rsi, vol_ratio: r.payload.vol_ratio,
+      whale_score: r.payload.whale_score, mfi: r.payload.mfi,
+      blockDeals: r.payload.blockDeals, cmaBuys: r.payload.cmaBuys,
+      insiders: r.payload.insiders, blockDealDates: r.payload.blockDealDates,
+      cmaSummary: r.payload.cmaSummary, insiderSummary: r.payload.insiderSummary,
+      trajectory: r.payload.trajectory, eta: r.payload.eta, scansLeft: r.payload.scansLeft,
+      detected_at: r.detected_at, refreshed_at: r.refreshed_at,
+      expires_at: r.expires_at,
+      discovery_price: r.discovery_price,
+    }));
+    return json(res, { opportunities, scanTs: state.scan.lastRun, generatedAt: state.scan.lastRun, signalDefs: SIGNAL_DEFS });
+  }
+
+  if (path === "/api/opportunities/refresh" && method === "POST") {
+    if (!state.scan.results?.length) return json(res, { error: 'No scan results — run a scan first' }, 400);
+    detectAndStoreSignals(state.scan.results).catch(() => {});
+    return json(res, { ok: true, message: 'Signal detection running — refresh /api/opportunities in 2s' });
+  }
+
+  // ── Strategy Validation ──────────────────────────────────────────────────────
+  if (path === '/api/strategy-validation' && method === 'GET') {
+    await refreshAllMilestones();
+    const tracks = dbTracked.getAll();
+    const allMs  = dbMilestones.getAllForTracks(tracks.map(t => t.id));
+    const msMap  = {};
+    allMs.forEach(m => { if (!msMap[m.track_id]) msMap[m.track_id] = {}; msMap[m.track_id][m.checkpoint] = m; });
+    return json(res, { tracks: tracks.map(t => ({ ...t, milestones: msMap[t.id] || {} })) });
+  }
+
+  if (path === '/api/strategy-validation/track' && method === 'POST') {
+    const body  = await readBody(req);
+    const { sym, name, signal_type, conviction, entry_price, stop, target1, target2, atr_pct,
+            rsi, mfi, whale_score, vol_ratio, obv_trend, divergence, weekly_trend,
+            market_regime, score, max_score, rs_score, signals_json } = body;
+    if (!sym || !entry_price) return json(res, { error: 'sym and entry_price required' }, 400);
+    const now    = new Date().toISOString();
+    const cap    = 20000;
+    const shares = entry_price > 0 ? +(cap / entry_price).toFixed(2) : 0;
+    const id     = dbTracked.insert({ sym, name, signal_type, conviction, tracked_at: now,
+      entry_price, simulated_capital: cap, shares, stop, target1, target2, atr_pct,
+      rsi, mfi, whale_score, vol_ratio, obv_trend, divergence, weekly_trend, market_regime,
+      score, max_score, rs_score, signals_json });
+    for (const [cp, days] of Object.entries(MILESTONE_DAYS)) {
+      const tDate = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+      dbMilestones.insert({ track_id: id, checkpoint: cp, target_date: tDate });
+    }
+    return json(res, { ok: true, id });
+  }
+
+  if (path === '/api/strategy-validation/insights' && method === 'GET') {
+    return json(res, computeInsights());
+  }
+
+  if (path.startsWith('/api/strategy-validation/') && method === 'POST') {
+    const parts = path.split('/');
+    const id    = parseInt(parts[3]);
+    const action = parts[4];
+    const track = dbTracked.get(id);
+    if (!track) return json(res, { error: 'not found' }, 404);
+
+    if (action === 'note') {
+      const { note } = await readBody(req);
+      dbTracked.addNote(id, note);
+      return json(res, { ok: true });
+    }
+    if (action === 'close') {
+      const { reason, exit_price } = await readBody(req);
+      dbTracked.close(id, reason || 'manual', exit_price ?? null);
+      return json(res, { ok: true });
+    }
+    if (action === 'refresh') {
+      await updateMilestonesForTrack(track);
+      const ms = dbMilestones.getAll(id);
+      return json(res, { ok: true, milestones: ms });
+    }
+  }
+
+  if (path.startsWith('/api/strategy-validation/') && method === 'DELETE') {
+    const id = parseInt(path.split('/')[3]);
+    dbTracked.delete(id);
+    return json(res, { ok: true });
   }
 
   // Auto-scan status
@@ -1933,9 +2289,266 @@ const server = createServer(async (req, res) => {
     });
   }
 
+  // ── Goals & Objectives ───────────────────────────────────────────────────────
+  if (path === '/api/goals/profile' && method === 'GET') {
+    try { return json(res, { profile: goalsProfile.get() }); }
+    catch(e) { return json(res, { error: e.message, profile: {} }, 500); }
+  }
+
+  if (path === '/api/goals/profile' && method === 'PUT') {
+    try {
+      const body = await readBody(req);
+      goalsProfile.save(body);
+      return json(res, { ok: true, profile: goalsProfile.get() });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path === '/api/goals/suggested' && method === 'GET') {
+    try {
+    const profile = goalsProfile.get();
+    const results = state.scan.results || [];
+    if (!results.length) return json(res, { suggested: [], reason: 'No scan results — run a scan first' });
+
+    const SHARIA_MAP = getAllStatuses();
+
+    // Filter candidates
+    let candidates = results.filter(r => {
+      if (r.bias === 'ERROR' || r.bias === 'NO_DATA' || r.bias === 'SKIP') return false;
+      if (['STRONG SELL','SELL','AVOID'].includes(r.bias)) return false; // goals only show longs for now
+      if (r.score < 4) return false;
+
+      // Market filter
+      const market = r.sym.startsWith('TADAWUL:') ? 'tasi'
+                   : r.sym.includes('USD') || ['BTC','ETH','XRP','SOL'].some(c=>r.sym.includes(c)) ? 'crypto'
+                   : (profile.preferred_markets||[]).includes('us') ? 'us' : null;
+      if (profile.preferred_markets?.length && !profile.preferred_markets.includes(market)) return false;
+
+      // Sharia filter
+      if (profile.sharia_required) {
+        const sh = SHARIA_MAP[r.sym];
+        if (sh && sh.status === 'non_compliant') return false;
+      }
+
+      // Style filter
+      if (profile.style_preference?.length) {
+        const styleTags = r.style_tags || [];
+        const hasStyle = profile.style_preference.some(s => styleTags.includes(s));
+        if (!hasStyle && styleTags.length > 0) return false;
+      }
+
+      return true;
+    });
+
+    // Rank: composite × expected_R × insight_multiplier
+    const insights = accuracyLab.getInsights();
+    const insightMap = {};
+    for (const ins of insights) insightMap[`${ins.style}__${ins.market}`] = ins;
+
+    candidates = candidates.map(r => {
+      const market = r.sym.startsWith('TADAWUL:') ? 'tasi' : 'us';
+      const styleTags = r.style_tags || [];
+      const insightKey = `${styleTags[0]}__${market}`;
+      const insight = insightMap[insightKey];
+      const insightMult = insight?.rating === 'strong' ? 1.3 : insight?.rating === 'weak' ? 0.7 : 1.0;
+      const expectedR = r.atr ? 3.0 : 1.5; // T2 / stop ratio
+      const rankScore = (r.composite || 0) * expectedR * insightMult;
+      return { ...r, _rankScore: rankScore, _market: market };
+    }).sort((a,b) => b._rankScore - a._rankScore);
+
+    // Real open positions — used for slot count and scale-in detection
+    const realPositions = state.positions || {};
+    const openSyms = new Set(Object.keys(realPositions).filter(k => !k.startsWith('_')));
+    const openCount = openSyms.size;
+    const maxPos = profile.max_open_positions || 5;
+    const slotsLeft = Math.max(0, maxPos - openCount);
+
+    // Remove held stocks with weak signals (not worth surfacing)
+    // Keep held stocks with strong signals — they become scale_in suggestions
+    candidates = candidates.filter(r => {
+      const held = openSyms.has(r.sym);
+      if (held && r.score < 7) return false;
+      return true;
+    });
+
+    // Top 9 candidates with trade plan
+    const suggested = candidates.slice(0, 9).map(r => {
+      const isBear = false; // goals only show longs
+      const alreadyHeld = openSyms.has(r.sym);
+
+      // Tier — held strong signal → scale_in; otherwise normal tiers
+      const tier = alreadyHeld ? 'scale_in'
+                 : r.score >= 7 ? 'enter'
+                 : r.score >= 5 ? 'watch'
+                 : 'monitor';
+      // scale_in: only add remaining half (assume first half already deployed)
+      const tierRiskMult = tier === 'enter' ? 1.0 : tier === 'watch' ? 0.5 : tier === 'scale_in' ? 0.5 : 0;
+
+      const stop = r.atr ? r.price - 1.5 * r.atr : null;
+      const t1   = r.atr ? r.price + 1.5 * r.atr : null;
+      const t2   = r.atr ? r.price + 3.0 * r.atr : null;
+      const riskAmt = profile.capital_sar * (profile.risk_per_trade_pct / 100) * tierRiskMult;
+      const shares  = tier !== 'monitor' && stop && r.price > stop ? Math.floor(riskAmt / (r.price - stop)) : null;
+      const positionValue = shares ? shares * r.price : null;
+      const t2Gain  = shares && t2 ? Math.round(shares * (t2 - r.price)) : null;
+      const t2Pct   = t2Gain && profile.capital_sar ? +(t2Gain / profile.capital_sar * 100).toFixed(1) : null;
+      const targetGain = profile.capital_sar * (profile.target_return_pct / 100);
+      const contributionPct = t2Gain && targetGain ? +(t2Gain / targetGain * 100).toFixed(1) : null;
+
+      // Why this stock matches — phrasing shifts by tier
+      const styleDescEnter = {
+        Momentum: 'strong near-term momentum — RSI in sweet zone, MACD confirming, volume backing it',
+        Trend: 'clean trend structure — EMA stack aligned with long-term uptrend, Hurst shows persistence',
+        Breakout: 'volume breakout — heavy volume surge with RS leadership vs the index',
+        Recovery: 'RSI recovery building — oscillator climbing while price stabilizes, early reversal signs',
+        Pullback: 'healthy pullback — touching EMA34 support in an intact uptrend, asymmetric entry risk',
+      };
+      const styleDescWatch = {
+        Momentum: 'momentum building — RSI climbing toward sweet zone, MACD approaching cross, awaiting volume confirmation',
+        Trend: 'trend forming — EMA stack partially aligned, Hurst trending, watch for score 7 confirmation',
+        Breakout: 'approaching resistance — price nearing key level, watch for volume surge before entering',
+        Recovery: 'early recovery signs — oscillator curling up, price stabilizing, not yet fully confirmed',
+        Pullback: 'pullback developing — EMA34 nearby, wait for bounce confirmation before entering',
+      };
+      const styleDescMonitor = {
+        Momentum: 'early momentum signals emerging — indicators beginning to align, no capital yet',
+        Trend: 'potential trend building — EMA stack starting to form, monitor for further development',
+        Breakout: 'pre-breakout consolidation — watch for volume surge confirmation before any entry',
+        Recovery: 'bottoming process underway — watch for oscillator curl and price stabilization',
+        Pullback: 'pullback in progress — wait for EMA support test and bounce before considering entry',
+      };
+      const descMap = (tier === 'enter' || tier === 'scale_in') ? styleDescEnter : tier === 'watch' ? styleDescWatch : styleDescMonitor;
+      const primaryStyle = (r.style_tags || [])[0] || 'Swing';
+      const why = descMap[primaryStyle] || 'multiple criteria aligned';
+
+      return {
+        sym: r.sym, name: r.name, ar: r.ar,
+        bias: r.bias, score: r.score, maxScore: r.maxScore,
+        composite: r.composite, style_tags: r.style_tags, price: r.price,
+        stop, t1, t2, shares, positionValue,
+        t2Gain, t2Pct, contributionPct,
+        rsi: r.rsi, atr: r.atr, atr_pct_rank: r.atr_pct_rank, hurst: r.hurst,
+        above_vwap: r.above_vwap, weekly: r.weekly,
+        sharia: SHARIA_MAP[r.sym] || null,
+        why, primaryStyle,
+        tier, tierRiskMult, alreadyHeld,
+        rankScore: Math.round(r._rankScore),
+      };
+    });
+
+    return json(res, { suggested, profile, total_candidates: candidates.length, open_positions: openCount, slots_left: slotsLeft });
+    } catch(e) { return json(res, { error: e.message, suggested: [] }, 500); }
+  }
+
+  // ── Accuracy Lab ─────────────────────────────────────────────────────────────
+  if (path === '/api/lab/signals' && method === 'GET') {
+    try {
+      const limit   = parseInt(url.searchParams.get('limit') || '200');
+      const outcomeQ = url.searchParams.get('outcome') || null;
+      const active  = accuracyLab.getActive();
+      const completed = accuracyLab.getAll({ limit, outcome: outcomeQ || undefined });
+      const stats   = accuracyLab.getStats();
+      const insights = accuracyLab.getInsights();
+      return json(res, { active, completed, stats, insights });
+    } catch(e) { return json(res, { error: e.message, active: [], completed: [], stats: {}, insights: [] }, 500); }
+  }
+
+  if (path === '/api/lab/signal' && method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const { sym, name, price_entry, price_stop, price_t1, price_t2, bias, notes } = body;
+      if (!sym || !price_entry) return json(res, { error: 'sym and price_entry required' }, 400);
+      const r = state.scan.results?.find(x => x.sym === sym);
+      const id = accuracyLab.log({
+        sym, name: name || r?.name || sym,
+        price_entry, price_stop, price_t1, price_t2, bias: bias || r?.bias,
+        score: r?.score, max_score: r?.maxScore,
+        composite: r?.composite, scan_mode: state.scan.mode || 'swing',
+        style_tags: r?.style_tags || [], market: sym.startsWith('TADAWUL:') ? 'tasi' : 'us',
+        hurst: r?.hurst, atr_rank: r?.atr_pct_rank,
+        rsi_entry: r?.rsi, vol_ratio_entry: r?.vol_ratio,
+      });
+      return json(res, { ok: true, id });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path.startsWith('/api/lab/signal/') && method === 'PATCH') {
+    try {
+      const id = parseInt(path.split('/')[4]);
+      const body = await readBody(req);
+      const { outcome, price_outcome, r_multiple } = body;
+      accuracyLab.updateOutcome(id, { outcome, price_outcome, r_multiple });
+      return json(res, { ok: true });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path.startsWith('/api/lab/signal/') && method === 'DELETE') {
+    try {
+      const id = parseInt(path.split('/')[4]);
+      accuracyLab.delete(id);
+      return json(res, { ok: true });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // ── Lab win-rate breakdown by market × style category ─────────────────────
+  if (path === '/api/lab/win-rates' && method === 'GET') {
+    try {
+      const categories = accuracyLab.winRateByCategory();
+      const stats      = accuracyLab.getStats();
+      return json(res, { categories, stats, ok: true });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // ── Kelly position sizer ──────────────────────────────────────────────────
+  if (path.startsWith('/api/kelly/') && method === 'GET') {
+    const sym = decodeURIComponent(path.slice('/api/kelly/'.length));
+    const r   = (state.scan.results || []).find(s => s.sym === sym);
+    if (!r) return json(res, { ok: false, error: 'Symbol not in last scan' }, 404);
+
+    const market    = r.sym.startsWith('TADAWUL:') ? 'tasi'
+                    : r.sym.includes('BTC') || r.sym.includes('ETH') || r.sym.includes('XRP') ? 'crypto'
+                    : 'us';
+    const styleTag  = (r.style_tags || [])[0] || 'Unknown';
+    const labData   = accuracyLab.winRateFor(market, styleTag);
+
+    // ATR-based risk per share (1.5× ATR)
+    const atrRisk  = r.atr != null ? +(r.atr * 1.5).toFixed(4) : null;
+    const riskPct  = (atrRisk && r.price > 0) ? +((atrRisk / r.price) * 100).toFixed(2) : null;
+
+    // Position sizing given kelly fraction and a default portfolio of 100k
+    let sizing = null;
+    if (labData && riskPct) {
+      const portfolioSAR    = 100000;
+      const riskAmountSAR   = portfolioSAR * (labData.kelly_half_pct / 100);
+      const sharesRaw       = atrRisk > 0 ? riskAmountSAR / atrRisk : 0;
+      const positionValue   = sharesRaw * r.price;
+      sizing = {
+        portfolio_sar:   portfolioSAR,
+        risk_per_trade_sar: +riskAmountSAR.toFixed(2),
+        recommended_shares: Math.floor(sharesRaw),
+        position_value_sar: +positionValue.toFixed(2),
+        position_pct:       +(positionValue / portfolioSAR * 100).toFixed(1),
+      };
+    }
+
+    return json(res, {
+      sym, market, style_tag: styleTag,
+      lab: labData,
+      atr_risk_per_share: atrRisk, risk_pct_of_price: riskPct,
+      sizing,
+      note: labData
+        ? `Based on ${labData.sample} completed signals in ${market}/${styleTag}`
+        : 'Insufficient signal history — use fixed 1-2% risk per trade until data accumulates',
+    });
+  }
+
   // Insider buys
   if (path === '/api/insider-buys' && method === 'GET') {
     return json(res, { buys: loadInsiderBuys() });
+  }
+  if (path === '/api/insider-buys/refresh' && method === 'POST') {
+    insiderRefreshTs = 0; // bypass TTL for manual refresh
+    const result = await fetchAndStoreInsiderBuys();
+    return json(res, { ...result, buys: loadInsiderBuys() });
   }
   if (path === '/api/insider-buys/add' && method === 'POST') {
     const body = await readBody(req);
@@ -1965,9 +2578,1401 @@ const server = createServer(async (req, res) => {
     return json(res, { ok: true });
   }
 
+  // ── CMA Filing Monitor ─────────────────────────────────────────────────────
+  if (path === '/api/cma/filings' && method === 'GET') {
+    const sym  = url.searchParams.get('sym');
+    const date = url.searchParams.get('date');
+    const rows = sym ? dbCMA.forSym(sym, date || null) : dbCMA.recent(100);
+    return json(res, { filings: rows, count: rows.length });
+  }
+
+  if (path === '/api/cma/cross-reference' && method === 'GET') {
+    const sym  = url.searchParams.get('sym');
+    const date = url.searchParams.get('date');
+    if (!sym) return json(res, { error: 'sym required' }, 400);
+    const filings = dbCMA.forSym(sym, date || null, 5);
+    const summary = dbCMA.summary(sym, 30);
+    return json(res, { filings, summary, confirmed: filings.length > 0 });
+  }
+
+  if (path === '/api/cma/filings/add' && method === 'POST') {
+    const body = await readBody(req);
+    const { sym, institution, direction, prev_pct, new_pct, shares_delta,
+            filing_date, source_url, company_ar, notes } = body;
+    if (!sym || !direction || !filing_date)
+      return json(res, { error: 'sym, direction, filing_date required' }, 400);
+    const code  = sym.replace(/^TADAWUL:/i, '');
+    const fullSym = sym.includes(':') ? sym : `TADAWUL:${code}`;
+    const scanRow = state.scan.results?.find(r => r.sym === fullSym);
+    const filing = {
+      sym: fullSym,
+      company: scanRow?.name || null,
+      company_ar: company_ar || null,
+      institution: institution || 'Unknown',
+      direction: ['buy','sell','unknown'].includes(direction) ? direction : 'unknown',
+      prev_pct: prev_pct != null ? parseFloat(prev_pct) : null,
+      new_pct:  new_pct  != null ? parseFloat(new_pct)  : null,
+      shares_delta: shares_delta ? parseInt(shares_delta) : null,
+      filing_date,
+      source: 'manual',
+      source_url: source_url || null,
+      raw_text: notes || null,
+      verified: 1,
+    };
+    if (dbCMA.exists(filing.sym, filing.institution, filing.filing_date))
+      return json(res, { ok: false, error: 'Duplicate: same stock + institution + date already exists' });
+    dbCMA.insert(filing);
+    return json(res, { ok: true, filing });
+  }
+
+  if (path === '/api/cma/filings/delete' && method === 'POST') {
+    const { id } = await readBody(req);
+    if (!id) return json(res, { error: 'id required' }, 400);
+    dbCMA.delete(id);
+    return json(res, { ok: true });
+  }
+
+  if (path === '/api/cma/refresh' && method === 'POST') {
+    try {
+      const result = await fetchAndStoreCMAFilings();
+      return json(res, result);
+    } catch (e) {
+      return json(res, { ok: false, error: e.message });
+    }
+  }
+
+  // ── Stock news (Google News RSS, EN + AR, 30-min cache) ──────────────────────
+  if (path.startsWith('/api/news/') && method === 'GET') {
+    const sym  = decodeURIComponent(path.slice('/api/news/'.length));
+    const cached = newsCache.get(sym);
+    if (cached && Date.now() - cached.ts < NEWS_TTL) return json(res, { articles: cached.articles });
+    const r    = (state.scan.results || []).find(s => s.sym === sym);
+    const name = r?.name || (sym.includes(':') ? sym.split(':')[1] : sym);
+    const code = sym.includes(':') ? sym.split(':')[1] : sym;
+    const [en, ar] = await Promise.all([
+      fetchGoogleNews(`"${name}" Saudi`, 'en', 'SA', 'SA:en').catch(() => []),
+      fetchGoogleNews(`${code} تداول`, 'ar', 'SA', 'SA:ar').catch(() => []),
+    ]);
+    const articles = [...en, ...ar].slice(0, 20);
+    newsCache.set(sym, { ts: Date.now(), articles });
+    return json(res, { articles, name });
+  }
+
+  // ── Pre-trade validator: rule-based, no AI API calls ─────────────────────────
+  if (path.startsWith('/api/validate/') && method === 'GET') {
+    const sym = decodeURIComponent(path.slice('/api/validate/'.length));
+    const r = (state.scan.results || []).find(s => s.sym === sym);
+    if (!r) return json(res, { ok: false, error: 'Symbol not in last scan' }, 404);
+
+    const hist = state.score_history[sym] || [];
+    const vel  = computeVelocity(hist);
+    const checks = [];
+
+    // 1. Signal strength
+    const signalOk = r.score >= 5;
+    checks.push({ name: 'Signal strength', pass: signalOk,
+      detail: `Score ${r.score}/${r.maxScore || 9} (${r.bias}) — ${signalOk ? 'sufficient conviction' : 'below BUY threshold (need ≥5)'}` });
+
+    // 2. Score trajectory
+    const trajOk = vel.direction !== 'falling';
+    checks.push({ name: 'Score trajectory', pass: trajOk,
+      detail: `${vel.direction === 'rising' ? '↗ Rising' : vel.direction === 'stable' ? '→ Stable' : '↘ Falling'} (slope ${vel.slope > 0 ? '+' : ''}${vel.slope}/scan) — ${trajOk ? 'momentum intact' : 'score declining — wait for stabilisation'}` });
+
+    // 3. RSI zone
+    const isBull = !BEAR_BIASES.has(r.bias);
+    const rsiOk = r.rsi != null && (isBull ? r.rsi >= 50 && r.rsi <= 85 : r.rsi >= 15 && r.rsi <= 50);
+    checks.push({ name: 'RSI zone', pass: rsiOk,
+      detail: r.rsi != null
+        ? `RSI ${r.rsi.toFixed(1)} — ${rsiOk ? 'in valid zone' : isBull ? 'out of bullish zone (50–85)' : 'out of bearish zone (15–50)'}`
+        : 'RSI unavailable' });
+
+    // 4. MACD direction
+    const macdOk = r.macd_hist != null && (isBull ? r.macd_hist > 0 : r.macd_hist < 0);
+    checks.push({ name: 'MACD direction', pass: macdOk,
+      detail: r.macd_hist != null
+        ? `Histogram ${r.macd_hist > 0 ? '+' : ''}${r.macd_hist.toFixed(4)} — ${macdOk ? 'confirms direction' : 'opposes signal direction'}`
+        : 'MACD unavailable' });
+
+    // 5. OBV trend
+    const obvOk = r.obv_trend === (isBull ? 'rising' : 'falling');
+    checks.push({ name: 'OBV trend', pass: obvOk,
+      detail: `OBV ${r.obv_trend || 'flat'} — ${obvOk ? 'confirms institutional flow' : 'diverges from signal (caution)'}` });
+
+    // 6. ATR rank (entry timing)
+    const atrOk = r.atr_pct_rank != null && r.atr_pct_rank < 80;
+    checks.push({ name: 'ATR entry timing', pass: atrOk,
+      detail: r.atr_pct_rank != null
+        ? `ATR rank ${r.atr_pct_rank}% — ${r.atr_pct_rank <= 25 ? 'coiling (ideal entry)' : r.atr_pct_rank < 80 ? 'moderate volatility' : 'overextended — late entry risk'}`
+        : 'ATR rank unavailable' });
+
+    // 7. Whale/smart money confirmation
+    const whaleOk = (r.whale_score || 0) >= 4;
+    checks.push({ name: 'Smart money', pass: whaleOk,
+      detail: `Whale score ${r.whale_score || 0}/10 — ${whaleOk ? 'institutional accumulation detected' : 'no smart money confirmation yet'}` });
+
+    // 8. Extension risk
+    const extOk = (r.extension_pct || 0) <= 25;
+    checks.push({ name: 'Extension risk', pass: extOk,
+      detail: `Price ${(r.extension_pct||0).toFixed(1)}% above 20-day low — ${extOk ? 'acceptable entry zone' : 'overextended from recent base (elevated pullback risk)'}` });
+
+    // 9. Portfolio concentration
+    const positions = state.positions || {};
+    const posCount  = Object.keys(positions).length;
+    const alreadyIn = !!positions[sym];
+    const concOk    = posCount < 15;
+    checks.push({ name: 'Portfolio capacity', pass: concOk || alreadyIn,
+      detail: alreadyIn ? `Already in portfolio — adding would increase concentration`
+        : `${posCount} open positions — ${concOk ? 'capacity available' : 'portfolio full (≥15 positions)'}` });
+
+    // 10. CMA filing (institutional accumulation)
+    let cmaFiling = null;
+    try { cmaFiling = dbCMA.forSym(sym, null, 1)?.[0] || null; } catch (_) {}
+    const cmaOk = !!cmaFiling;
+    checks.push({ name: 'CMA institutional filing', pass: cmaOk,
+      detail: cmaOk
+        ? `${cmaFiling.institution} ${cmaFiling.direction} on ${cmaFiling.filing_date} — institutional confirmation`
+        : 'No recent CMA filing — no institutional confirmation (not blocking)' });
+
+    // 11. Historical edge (Bayesian win-rate from accuracy lab)
+    const labMarket  = sym.startsWith('TADAWUL:') ? 'tasi' : sym.includes('BTC') || sym.includes('ETH') ? 'crypto' : 'us';
+    const labStyle   = (r.style_tags || [])[0] || 'Unknown';
+    const labData    = (() => { try { return accuracyLab.winRateFor(labMarket, labStyle); } catch { return null; } })();
+    const labOk      = labData != null && labData.win_rate_pct >= 55 && labData.expectancy >= 0.5;
+    checks.push({ name: 'Historical edge', pass: labOk,
+      detail: labData
+        ? `${labData.win_rate_pct}% win rate · ${labData.expectancy}R expectancy · ${labData.sample} signals (${labData.confidence} confidence) — ${labData.style || labStyle} setups in ${labMarket}`
+        : `No sufficient history for ${labStyle}/${labMarket} — accumulating data (not blocking)`,
+      kelly: labData ? { full: labData.kelly_full_pct, half: labData.kelly_half_pct } : null });
+
+    // 12. Earnings proximity (requires Finnhub token; auto-passes if no data)
+    let earningsEvent = null;
+    try { earningsEvent = await getEarningsCalendar(sym); } catch (_) {}
+    let earningsOk = true, earningsDays = null, earningsDetail = 'No earnings data available (Finnhub token not set or TASI stock) — skipping';
+    if (earningsEvent?.date) {
+      earningsDays = Math.round((new Date(earningsEvent.date) - Date.now()) / 864e5);
+      if (earningsDays >= 0 && earningsDays <= 7) {
+        earningsOk = false;
+        const when = earningsDays === 0 ? 'today' : earningsDays === 1 ? 'tomorrow' : `in ${earningsDays} days`;
+        const session = earningsEvent.hour === 'bmo' ? ' (pre-market)' : earningsEvent.hour === 'amc' ? ' (after-close)' : '';
+        earningsDetail = `⚠ Earnings ${when}${session} (${earningsEvent.date}) — high binary risk, entry not recommended`;
+      } else if (earningsDays > 7) {
+        earningsDetail = `Earnings on ${earningsEvent.date} (${earningsDays} days away) — safe to enter`;
+      } else {
+        earningsDetail = `Earnings have passed (${earningsEvent.date}) — no upcoming risk`;
+      }
+    }
+    checks.push({ name: 'Earnings proximity', pass: earningsOk, detail: earningsDetail,
+      ...(earningsDays != null ? { earnings_date: earningsEvent.date, earnings_days: earningsDays } : {}) });
+
+    const passingCount = checks.filter(c => c.pass).length;
+    const scoreVal = Math.round(passingCount / checks.length * 100);
+    const verdict = scoreVal >= 78 ? 'STRONG GO' : scoreVal >= 58 ? 'CAUTIOUS GO' : scoreVal >= 38 ? 'WAIT' : 'NO GO';
+    const summary = scoreVal >= 78
+      ? 'Setup has strong multi-factor confirmation. Entry is well-timed.'
+      : scoreVal >= 58
+      ? 'Most criteria align. Monitor the failing checks before entering.'
+      : scoreVal >= 38
+      ? 'Mixed signals. Wait for at least 8/12 checks to pass.'
+      : 'Too many red flags. Avoid entry until the setup improves.';
+
+    return json(res, { sym, name: r.name, bias: r.bias, score: r.score, verdict, confidence: scoreVal, summary, checks, velocity: vel,
+      conviction_score: r.conviction_score || null, patterns: r.patterns || [], scanned_at: state.scan.lastRun });
+  }
+
+  // ── Sector breadth ────────────────────────────────────────────────────────────
+  if (path === '/api/sectors/breadth' && method === 'GET') {
+    const results = state.scan.results || [];
+    const map = {};
+    for (const r of results) {
+      if (['ERROR','NO_DATA'].includes(r.bias)) continue;
+      const sec = sectorOf(r.sym);
+      if (!map[sec]) map[sec] = { sector: sec, stocks: [], count_buy: 0, count_watch: 0, count_sell: 0, count_skip: 0, scores: [], rs_scores: [] };
+      map[sec].stocks.push(r.sym);
+      if (['STRONG BUY','BUY'].includes(r.bias)) map[sec].count_buy++;
+      else if (r.bias === 'WATCH') map[sec].count_watch++;
+      else if (['STRONG SELL','SELL','AVOID'].includes(r.bias)) map[sec].count_sell++;
+      else map[sec].count_skip++;
+      if (r.score != null) map[sec].scores.push(r.score);
+      if (r.rs_score != null) map[sec].rs_scores.push(r.rs_score);
+    }
+    const sectors = Object.values(map).map(s => {
+      const total = s.stocks.length;
+      const avg_score = s.scores.length ? +(s.scores.reduce((a,b)=>a+b,0) / s.scores.length).toFixed(1) : 0;
+      const avg_rs    = s.rs_scores.length ? +(s.rs_scores.reduce((a,b)=>a+b,0) / s.rs_scores.length).toFixed(2) : null;
+      const bull_pct  = total ? Math.round(s.count_buy / total * 100) : 0;
+      const momentum  = bull_pct >= 60 ? 'strong' : bull_pct >= 40 ? 'mixed' : 'weak';
+      return { sector: s.sector, total, count_buy: s.count_buy, count_watch: s.count_watch, count_sell: s.count_sell, avg_score, avg_rs, bull_pct, momentum };
+    }).sort((a, b) => b.bull_pct - a.bull_pct);
+    return json(res, { sectors, total_stocks: results.length, scanned_at: state.scan.lastRun });
+  }
+
+  // ── Morning playbook (rule-based, no AI) ─────────────────────────────────────
+  if (path === '/api/playbook' && method === 'GET') {
+    const results = state.scan.results || [];
+    if (!results.length) return json(res, { ok: false, error: 'No scan data — run a scan first' });
+
+    // Market regime from scan results
+    const regimeVotes = results.filter(r => r.market_regime).map(r => r.market_regime);
+    const regimeCounts = { bull: 0, neutral: 0, bear: 0 };
+    for (const v of regimeVotes) regimeCounts[v] = (regimeCounts[v] || 0) + 1;
+    const marketRegime = Object.entries(regimeCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || 'neutral';
+
+    // Market mood (from bias distribution)
+    const buyCount  = results.filter(r => ['STRONG BUY','BUY'].includes(r.bias)).length;
+    const sellCount = results.filter(r => ['STRONG SELL','SELL'].includes(r.bias)).length;
+    const total     = results.filter(r => !['ERROR','NO_DATA'].includes(r.bias)).length;
+    const bullPct   = total ? Math.round(buyCount / total * 100) : 0;
+    const mood      = bullPct >= 55 ? 'Good' : bullPct >= 35 ? 'Cautious' : 'Weak';
+
+    // Top 3 setups: highest composite + rising/stable velocity
+    const topSetups = results
+      .filter(r => ['STRONG BUY','BUY'].includes(r.bias) && r.composite >= 60)
+      .map(r => ({ ...r, vel: computeVelocity(state.score_history[r.sym] || []) }))
+      .filter(r => r.vel.direction !== 'falling')
+      .sort((a, b) => (b.composite + (b.vel.slope > 0 ? 5 : 0)) - (a.composite + (a.vel.slope > 0 ? 5 : 0)))
+      .slice(0, 3)
+      .map(r => ({ sym: r.sym, name: r.name, bias: r.bias, score: r.score, composite: r.composite,
+        price: r.price, rs_score: r.rs_score, whale_score: r.whale_score, atr_pct_rank: r.atr_pct_rank,
+        velocity: r.vel, sector: sectorOf(r.sym) }));
+
+    // Positions needing attention (exit check lite)
+    const openPositions = Object.entries(state.positions || {});
+    const positionAlerts = openPositions.map(([sym, pos]) => {
+      const scan = results.find(r => r.sym === sym);
+      if (!scan) return null;
+      const vel = computeVelocity(state.score_history[sym] || []);
+      const exitSignals = [];
+      if (vel.direction === 'falling') exitSignals.push('Score declining');
+      if (scan.rsi != null && scan.rsi < 48) exitSignals.push(`RSI ${scan.rsi.toFixed(1)} below 48`);
+      if (scan.macd_hist != null && scan.macd_hist < 0) exitSignals.push('MACD turned negative');
+      if (scan.emas?.ema34 && scan.price < scan.emas.ema34) exitSignals.push('Price below EMA 34');
+      const action = exitSignals.length >= 2 ? 'EXIT' : exitSignals.length === 1 ? 'WATCH' : 'HOLD';
+      return { sym, name: scan.name, action, exitSignals, score: scan.score, bias: scan.bias, velocity: vel };
+    }).filter(Boolean);
+
+    // Sector breadth snapshot
+    const secMap = {};
+    for (const r of results) {
+      if (['ERROR','NO_DATA'].includes(r.bias)) continue;
+      const sec = sectorOf(r.sym);
+      if (!secMap[sec]) secMap[sec] = { buy: 0, total: 0 };
+      if (['STRONG BUY','BUY'].includes(r.bias)) secMap[sec].buy++;
+      secMap[sec].total++;
+    }
+    const sectorSummary = Object.entries(secMap)
+      .map(([sector, d]) => ({ sector, bull_pct: d.total ? Math.round(d.buy/d.total*100) : 0, total: d.total }))
+      .sort((a,b) => b.bull_pct - a.bull_pct);
+
+    // Risk posture
+    const riskPosture = marketRegime === 'bull' && bullPct >= 55 ? 'Aggressive'
+      : marketRegime === 'bear' || bullPct < 30 ? 'Defensive'
+      : 'Selective';
+
+    return json(res, {
+      date: new Date().toISOString().slice(0,10),
+      market_regime: marketRegime,
+      market_mood: mood,
+      bull_pct: bullPct,
+      buy_count: buyCount,
+      sell_count: sellCount,
+      scanned: total,
+      risk_posture: riskPosture,
+      top_setups: topSetups,
+      position_alerts: positionAlerts,
+      sector_summary: sectorSummary.slice(0, 8),
+      scanned_at: state.scan.lastRun,
+    });
+  }
+
+  // ── Exit intelligence: open positions exit check ──────────────────────────────
+  if (path === '/api/positions/exit-check' && method === 'GET') {
+    const results  = state.scan.results || [];
+    const scanMap  = new Map(results.map(r => [r.sym, r]));
+    const positions = state.positions || {};
+
+    const checks = Object.entries(positions).map(([sym, pos]) => {
+      const r   = scanMap.get(sym);
+      const vel = computeVelocity(state.score_history[sym] || []);
+      const exitSignals = [];
+      const holdSignals = [];
+
+      if (!r) return { sym, name: pos.name || sym, action: 'DATA_MISSING', note: 'Not in last scan — re-scan to update', velocity: vel };
+
+      if (vel.direction === 'falling') exitSignals.push({ reason: 'Score declining', weight: 2 });
+      else if (vel.direction === 'rising') holdSignals.push('Score rising — momentum building');
+
+      if (r.rsi != null) {
+        if (r.rsi < 48) exitSignals.push({ reason: `RSI ${r.rsi.toFixed(1)} — below momentum zone`, weight: 2 });
+        else if (r.rsi >= 52 && r.rsi <= 75) holdSignals.push(`RSI ${r.rsi.toFixed(1)} — healthy momentum`);
+        else if (r.rsi > 80) exitSignals.push({ reason: `RSI ${r.rsi.toFixed(1)} — stretched (partial exit consideration)`, weight: 1 });
+      }
+
+      if (r.macd_hist != null) {
+        if (r.macd_hist < 0) exitSignals.push({ reason: 'MACD histogram negative — trend weakening', weight: 2 });
+        else holdSignals.push('MACD positive — uptrend intact');
+      }
+
+      if (r.emas?.ema34 && r.price < r.emas.ema34) {
+        exitSignals.push({ reason: `Price ${r.price.toFixed(2)} below EMA 34 (${r.emas.ema34.toFixed(2)})`, weight: 3 });
+      } else if (r.emas?.ema34) {
+        holdSignals.push(`Price above EMA 34 — trend support intact`);
+      }
+
+      if (r.obv_trend === 'falling') exitSignals.push({ reason: 'OBV falling — smart money distributing', weight: 1 });
+
+      const exitWeight = exitSignals.reduce((a, e) => a + e.weight, 0);
+      const action = exitWeight >= 5 ? 'EXIT' : exitWeight >= 3 ? 'REDUCE' : exitWeight >= 1 ? 'WATCH' : 'HOLD';
+
+      const entryPrice = pos.buy_price || pos.price || null;
+      const pl_pct = entryPrice ? +((r.price - entryPrice) / entryPrice * 100).toFixed(2) : null;
+
+      return {
+        sym, name: r.name || sym, action,
+        score: r.score, bias: r.bias, price: r.price, pl_pct,
+        exit_signals: exitSignals.map(e => e.reason),
+        hold_signals: holdSignals,
+        velocity: vel,
+        rsi: r.rsi, macd_hist: r.macd_hist, obv_trend: r.obv_trend,
+        ema34: r.emas?.ema34 || null,
+      };
+    });
+
+    const exitCount   = checks.filter(c => c.action === 'EXIT').length;
+    const reduceCount = checks.filter(c => c.action === 'REDUCE').length;
+    const watchCount  = checks.filter(c => c.action === 'WATCH').length;
+    const holdCount   = checks.filter(c => c.action === 'HOLD').length;
+    return json(res, { checks, summary: { exit: exitCount, reduce: reduceCount, watch: watchCount, hold: holdCount }, scanned_at: state.scan.lastRun });
+  }
+
   res.writeHead(404);
   res.end("Not found");
+  } catch (err) {
+    console.error('[server] Unhandled error:', err);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
 });
+
+// ── Multi-Signal Opportunity Engine ───────────────────────────────────────────
+// 9 signal types, conviction scoring (0-100), freshness decay, DB persistence.
+// Covers: confirmed breakouts, multi-TF confluence, pre-breakout coils,
+// smart money (block deals + CMA + insider), score trajectory projections,
+// stealth RS leaders, divergence reversals, insider+technical sync, vol expansion.
+
+const SIGNAL_DEFS = {
+  STRONG_BUY_CONFIRMED:     { label: 'Signal Confirmed',    icon: '✅', color: '#00c853', bg: 'rgba(0,200,83,.13)',    base: 55, halfLifeH: 48  },
+  MTF_CONFLUENCE:           { label: 'Multi-TF Confluence', icon: '🎯', color: '#16a34a', bg: 'rgba(22,163,74,.13)',   base: 62, halfLifeH: 36  },
+  PRE_BREAKOUT_COIL:        { label: 'Pre-Breakout Coil',   icon: '🌀', color: '#7c3aed', bg: 'rgba(124,58,237,.13)', base: 50, halfLifeH: 20  },
+  SMART_MONEY_ACCUMULATION: { label: 'Smart Money',         icon: '🐳', color: '#0891b2', bg: 'rgba(8,145,178,.13)',  base: 65, halfLifeH: 72  },
+  SCORE_TRAJECTORY:         { label: 'Building Momentum',   icon: '📈', color: '#059669', bg: 'rgba(5,150,105,.13)',  base: 40, halfLifeH: 14  },
+  STEALTH_RS_LEADER:        { label: 'Stealth RS Leader',   icon: '⚡', color: '#d97706', bg: 'rgba(217,119,6,.13)',  base: 45, halfLifeH: 48  },
+  DIVERGENCE_REVERSAL:      { label: 'Divergence Reversal', icon: '↩',  color: '#dc2626', bg: 'rgba(220,38,38,.13)', base: 48, halfLifeH: 30  },
+  INSIDER_TECHNICAL_SYNC:   { label: 'Insider + Setup',     icon: '🔍', color: '#9333ea', bg: 'rgba(147,51,234,.13)', base: 68, halfLifeH: 120 },
+  VOLATILITY_EXPANSION:     { label: 'Volatility Breakout', icon: '💥', color: '#ea580c', bg: 'rgba(234,88,12,.13)', base: 52, halfLifeH: 10  },
+};
+
+// ── Math helpers ──────────────────────────────────────────────────────────────
+
+function oppFreshness(detectedAt, halfLifeH) {
+  const h = (Date.now() - new Date(detectedAt).getTime()) / 3600000;
+  return Math.exp(-Math.LN2 * h / halfLifeH);
+}
+
+function oppConviction(base, fresh, confluenceN, regime) {
+  const conf = Math.min(1.8, 1.0 + (confluenceN - 1) * 0.15);
+  const reg  = regime === 'bull' ? 1.15 : regime === 'bear' ? 0.8 : 1.0;
+  return Math.min(100, Math.round(base * conf * fresh * reg));
+}
+
+function oppLinReg(values) {
+  const n = values.length;
+  if (n < 2) return { slope: 0, r2: 0 };
+  const mx = (n - 1) / 2, my = values.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  values.forEach((v, i) => { num += (i - mx) * (v - my); den += (i - mx) ** 2; });
+  const slope = den ? num / den : 0;
+  const pred  = values.map((_, i) => my + slope * (i - mx));
+  const ssr   = values.reduce((a, v, i) => a + (v - pred[i]) ** 2, 0);
+  const sst   = values.reduce((a, v) => a + (v - my) ** 2, 0);
+  return { slope: +slope.toFixed(3), r2: sst ? +(1 - ssr / sst).toFixed(2) : 0 };
+}
+
+function oppATR(r) {
+  const atr     = r.atr || (r.atr_pct ? r.price * r.atr_pct / 100 : r.price * 0.02);
+  const atr_pct = +(atr / r.price * 100).toFixed(2);
+  return { atr, atr_pct, estimated: !r.atr && !r.atr_pct };
+}
+
+function oppSetup(r, atrd) {
+  const px   = +r.price.toFixed(2);
+  const stop = +(r.price - 1.5 * atrd.atr).toFixed(2);
+  const t1   = +(r.price + 1.5 * atrd.atr).toFixed(2);
+  const t2   = +(r.price + 3   * atrd.atr).toFixed(2);
+  const atrNote = atrd.estimated ? ` (ATR ~${atrd.atr_pct}%, est.)` : ` (${atrd.atr_pct}% ATR)`;
+  return { stop, target1: t1, target2: t2, str: `Entry ${px}, stop ${stop}${atrNote}, targets ${t1} / ${t2} — R:R 2:1.` };
+}
+
+function oppRsPercentile(scanResults) {
+  const vals = scanResults.map(r => r.rs_score).filter(v => v != null).sort((a, b) => a - b);
+  return (sym) => {
+    const r = scanResults.find(s => s.sym === sym);
+    if (!r?.rs_score || !vals.length) return null;
+    return Math.round(vals.filter(v => v < r.rs_score).length / vals.length * 100);
+  };
+}
+
+// ── Signal Detectors ──────────────────────────────────────────────────────────
+
+function sigStrongBuy(r) {
+  if (!['STRONG BUY', 'BUY'].includes(r.bias) || r.score < 6 || (r.vol_ratio ?? 0) < 1.0) return null;
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const { ema13, ema34, ema89, ema200 } = r.emas || {};
+  const parts = [];
+  if (ema13 > ema34 && ema34 > ema89 && ema89 > ema200) parts.push('EMA 13>34>89>200 full stack');
+  else if (ema13 > ema34 && ema34 > ema89)              parts.push('EMA 13>34>89 aligned');
+  if (r.rsi)           parts.push(`RSI ${+r.rsi.toFixed(1)}`);
+  if (r.macd_hist > 0) parts.push(`MACD +${r.macd_hist.toFixed(3)}`);
+  if (r.vol_ratio >= 1.5) parts.push(`volume ${r.vol_ratio}× avg`);
+  else if (r.vol_ratio >= 1.2) parts.push(`vol ${r.vol_ratio}× avg`);
+  if (r.mfi >= 65)     parts.push(`MFI ${r.mfi}`);
+  if (r.whale_score >= 5) parts.push(`whale ${r.whale_score}/10`);
+  if (r.divergence === 'bullish')              parts.push('bullish divergence');
+  if (r.weekly?.trend === 'bullish')           parts.push('weekly bullish');
+  const risks = [];
+  if (r.near_resistance)        risks.push('price at resistance — close above to confirm');
+  if ((r.extension_pct ?? 0) > 5) risks.push(`extended ${r.extension_pct}% above EMA13`);
+  if (r.market_regime === 'bear') risks.push('bearish regime — size down');
+  const note = `${parts.slice(0, 4).join('; ')}. ${setup.str}${risks.length ? ' ⚠ ' + risks[0] + '.' : ''}`;
+  const hl   = `${r.score}/${r.maxScore} confirmed` + (r.whale_score >= 6 ? ' + whale' : '') + (r.divergence === 'bullish' ? ' + div' : '');
+  return { type: 'STRONG_BUY_CONFIRMED', headline: hl, note, extra: setup };
+}
+
+function sigMTF(r) {
+  const wBull = r.weekly?.trend === 'bullish' || r.weekly?.bias === 'bullish';
+  const { ema13, ema34, ema89 } = r.emas || {};
+  if (r.score < 5 || !wBull || !(ema13 > ema34 && ema34 > ema89)) return null;
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const rg    = r.market_regime || 'neutral';
+  const note  = `Score ${r.score}/8 with bullish weekly — both timeframes aligned. EMA 13>34>89; RSI ${r.rsi ? +r.rsi.toFixed(1) : '—'}; vol ${r.vol_ratio}×. ${rg === 'bull' ? 'Regime bullish — maximum confluence.' : `Regime ${rg}.`} ${setup.str}`;
+  return { type: 'MTF_CONFLUENCE', headline: `Daily+Weekly aligned · regime ${rg}`, note, extra: setup };
+}
+
+function sigCoil(r) {
+  const compressed = !!r.vol_compression;
+  const building   = !!r.rsi_buildup;
+  const nearR      = !!r.near_resistance;
+  const rsiZone    = r.rsi >= 46 && r.rsi <= 66;
+  const obvOk      = r.obv_trend !== 'falling';
+  const quietVol   = (r.vol_ratio ?? 1) < 1.0;
+  const cnt = [compressed, building, nearR, rsiZone, obvOk, quietVol].filter(Boolean).length;
+  if (cnt < 3 || ['SKIP','AVOID','SELL','STRONG SELL'].includes(r.bias)) return null;
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const note  = `Volatility ${compressed ? 'compressed (squeeze confirmed)' : 'tightening'}, RSI ${r.rsi ? +r.rsi.toFixed(1) : '—'} ${building ? 'building from below 52' : 'in neutral zone'}, vol ${r.vol_ratio}× (quiet). ${nearR ? 'Coiling at resistance — breakout imminent on volume surge.' : 'Consolidating — watch for expansion bar.'} ${setup.str}`;
+  return { type: 'PRE_BREAKOUT_COIL', headline: `Coiling — ${cnt}/6 conditions`, note, extra: { ...setup, conditionsMet: cnt } };
+}
+
+function sigSmartMoney(r, ctx) {
+  const code     = r.sym.split(':')[1];
+  const recentBD = ctx.recentBlockDeals.filter(d => d.sym === r.sym || (d.sym ?? '').includes(code));
+  const cmaBuys  = ctx.allCMA.filter(f => f.sym === r.sym && f.direction === 'buy').slice(0, 3);
+  const insiders = ctx.allInsider.filter(b => b.sym === r.sym || (b.sym ?? '').includes(code));
+  // Hard evidence = documented institutional action
+  const hardEvidence = [recentBD.length >= 1, cmaBuys.length >= 1, insiders.length >= 1].filter(Boolean).length;
+  // Stealth: OBV rising + price flat + strong institutional indicators
+  const stealthOBV = r.obv_trend === 'rising' && Math.abs(r.change_pct ?? 0) < 1.5
+                     && (r.whale_score ?? 0) >= 6 && (r.mfi ?? 0) >= 60;
+  if (hardEvidence < 1 && !stealthOBV) return null;
+  if ((r.whale_score ?? 0) < 4) return null;
+  const parts = [];
+  if (recentBD.length)  parts.push(`${recentBD.length} block deal${recentBD.length > 1 ? 's' : ''} (${recentBD.slice(0,2).map(d => d.date).join(', ')})`);
+  if (cmaBuys.length)   parts.push(`CMA buy: ${cmaBuys[0].institution_en || cmaBuys[0].institution || 'institution'} → ${cmaBuys[0].new_pct || '?'}%`);
+  if (insiders.length)  parts.push(`insider buy: ${insiders[0].person || 'director'} (${insiders[0].date})`);
+  if (stealthOBV)       parts.push(`OBV rising, price flat (${r.change_pct ?? 0}%)`);
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const note  = `Smart money signals: ${parts.join('; ')}. Whale score ${r.whale_score ?? 0}/10. ${setup.str}`;
+  return { type: 'SMART_MONEY_ACCUMULATION', headline: `Smart money: ${parts.slice(0,2).join(' + ')}`, note,
+    extra: { ...setup, blockDeals: recentBD.length, cmaBuys: cmaBuys.length, insiders: insiders.length,
+      blockDealDates: recentBD.map(d => d.date).slice(0,3),
+      cmaSummary: cmaBuys[0] ? `${cmaBuys[0].institution_en || cmaBuys[0].institution} → ${cmaBuys[0].new_pct}%` : null,
+      insiderSummary: insiders[0] ? `${insiders[0].person} (${insiders[0].role}) · ${insiders[0].date}` : null } };
+}
+
+function sigTrajectory(r, ctx) {
+  const hist = ctx.scoreHist[r.sym];
+  if (!hist || hist.length < 3) return null;
+  const scores = hist.slice(0, 6).reverse().map(e => e.s ?? 0);
+  const { slope, r2 } = oppLinReg(scores);
+  const current = scores[scores.length - 1];
+  if (slope < 0.3 || r2 < 0.4 || current >= 7 || current < 3) return null;
+  const scansLeft = Math.ceil((7 - current) / slope);
+  const etaH     = scansLeft * 2.4;
+  const eta       = etaH < 4 ? 'next 1-2 scans' : etaH < 12 ? 'later today' : etaH < 30 ? 'tomorrow' : `~${Math.round(etaH / 24)} days`;
+  const traj  = scores.join('→');
+  const driver = r.rsi_buildup ? 'RSI building' : (r.macd_hist ?? 0) > 0 ? 'MACD turning +' : 'momentum building';
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const note  = `Score trajectory ${traj} (+${slope}/session, R²=${r2}). STRONG BUY trigger projected ${eta}. ${driver}. Currently ${current}/8 — not yet actionable but watch closely. ${setup.str}`;
+  return { type: 'SCORE_TRAJECTORY', headline: `Score ${traj} → trigger in ${eta}`, note,
+    extra: { slope, r2, trajectory: traj, scansLeft, eta, current, ...setup } };
+}
+
+function sigStealthRS(r, ctx) {
+  const pct = ctx.rsPercentile(r.sym);
+  if (pct == null || pct < 85 || r.score > 6 || (r.rs_score ?? 0) < 2.0) return null;
+  if ((r.bearFlags || []).length > 0) return null;
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const top   = 100 - pct;
+  const note  = `RS score +${r.rs_score}% vs TASI — top ${top}% of universe, yet technical score only ${r.score}/8. Relative strength not yet reflected in chart signals. ${r.weekly?.trend === 'bullish' ? 'Weekly trend improving. ' : ''}One confirming bar closes this gap. ${setup.str}`;
+  return { type: 'STEALTH_RS_LEADER', headline: `RS top ${top}% · score lags at ${r.score}/8`, note, extra: { rsPct: pct, rs_score: r.rs_score, ...setup } };
+}
+
+function sigDivergence(r) {
+  if (r.divergence !== 'bullish') return null;
+  const nearSup = !!r.near_support;
+  const mfiLow  = r.mfi != null && r.mfi < 40;
+  const whaleOk = (r.whale_score ?? 0) >= 4;
+  const cnt = [nearSup, mfiLow, whaleOk, r.rsi > 28 && r.rsi < 55].filter(Boolean).length;
+  if (cnt < 2) return null;
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const note  = `Bullish RSI divergence: price made lower low, RSI held higher — momentum not confirming the selloff.${nearSup ? ' Near support.' : ''}${r.mfi != null ? ` MFI ${r.mfi} (${mfiLow ? 'oversold' : 'recovering'}).` : ''} Whale ${r.whale_score ?? 0}/10${whaleOk ? ' — institutional cover.' : '.'} ${setup.str}`;
+  return { type: 'DIVERGENCE_REVERSAL', headline: `Bullish divergence + ${cnt}/4 reversal signals`, note, extra: setup };
+}
+
+function sigInsider(r, ctx) {
+  const code    = r.sym.split(':')[1];
+  const recent  = ctx.allInsider.filter(b => {
+    if (b.sym !== r.sym && !(b.sym ?? '').includes(code)) return false;
+    return (Date.now() - new Date(b.date).getTime()) / 86400000 <= 30;
+  });
+  if (!recent.length || r.score < 4) return null;
+  const best   = recent[0];
+  const daysAgo = Math.round((Date.now() - new Date(best.date).getTime()) / 86400000);
+  const atrd   = oppATR(r);
+  const setup  = oppSetup(r, atrd);
+  const note   = `${best.person || 'Director'} (${best.role || 'insider'}) bought ${best.shares ? best.shares.toLocaleString() + ' shares' : 'shares'}${best.price ? ' @ ' + best.price.toFixed(2) + ' SAR' : ''} — ${daysAgo} days ago. Technical score ${r.score}/8 ${r.score >= 6 ? '(confirmed setup)' : '(building)'} — insider buying with the chart. ${setup.str}`;
+  return { type: 'INSIDER_TECHNICAL_SYNC', headline: `${best.person || 'Director'} bought · ${daysAgo}d ago · ${r.score}/8`, note,
+    extra: { ...setup, insiderName: best.person, insiderRole: best.role, daysAgo, insiderPrice: best.price } };
+}
+
+function sigVolExpansion(r) {
+  const z = r.vol_zscore ?? 0;
+  if (z < 2.0 || !r.vol_compression) return null; // must expand FROM compression
+  const atrd  = oppATR(r);
+  const setup = oppSetup(r, atrd);
+  const note  = `Volume z-score ${z.toFixed(1)}σ above average — ${z >= 3 ? 'extreme' : 'strong'} surge from a compressed base. Coil resolved with force. ATR at ${atrd.atr_pct}%. This is the breakout bar — or the first candle of one. ${setup.str}`;
+  return { type: 'VOLATILITY_EXPANSION', headline: `Vol z-score ${z.toFixed(1)}σ — coil resolved`, note, extra: { z, ...setup } };
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
+
+function runAllDetectors(scanResults) {
+  const regime    = scanResults.find(r => r.market_regime)?.market_regime || 'neutral';
+  const calcRsP   = oppRsPercentile(scanResults);
+  const allCMA    = dbCMA.recent(200);
+  const allInsider = dbInsiderBuys.getAll();
+  const recentBlockDeals = dbBlockDeals.recentAll ? dbBlockDeals.recentAll(15) : [];
+  const scoreHist = state.score_history || {};
+  const ctx = { allCMA, allInsider, recentBlockDeals, scoreHist, rsPercentile: calcRsP };
+
+  const rawSignals = [];
+  for (const r of scanResults) {
+    if (r.error || !r.sym || !r.price) continue;
+    const detected = [
+      sigStrongBuy(r), sigMTF(r), sigCoil(r),
+      sigSmartMoney(r, ctx), sigTrajectory(r, ctx),
+      sigStealthRS(r, ctx), sigDivergence(r),
+      sigInsider(r, ctx), sigVolExpansion(r),
+    ].filter(Boolean).map(sig => ({ ...sig, sym: r.sym, name: r.name, price: r.price,
+      score: r.score, maxScore: r.maxScore, bias: r.bias, regime,
+      rsi: r.rsi, vol_ratio: r.vol_ratio, whale_score: r.whale_score, mfi: r.mfi }));
+    rawSignals.push(...detected);
+  }
+
+  // Confluence: how many signal types fired for each stock
+  const confMap = {};
+  rawSignals.forEach(s => { confMap[s.sym] = (confMap[s.sym] || 0) + 1; });
+
+  // Assign conviction to each signal
+  const now = new Date().toISOString();
+  rawSignals.forEach(s => {
+    const def = SIGNAL_DEFS[s.type];
+    s.conviction = oppConviction(def.base, 1.0, confMap[s.sym] || 1, s.regime);
+    s.confluence = confMap[s.sym] || 1;
+    s.expires_at = new Date(Date.now() + def.halfLifeH * 3 * 3600000).toISOString();
+    s.detectedAt = now;
+    s.payload    = {
+      name: s.name, price: s.price, score: s.score, maxScore: s.maxScore, bias: s.bias,
+      headline: s.headline, note: s.note, conviction: s.conviction, confluence: s.confluence,
+      regime: s.regime, expires_at: s.expires_at, rsi: s.rsi, vol_ratio: s.vol_ratio,
+      whale_score: s.whale_score, mfi: s.mfi, ...s.extra,
+    };
+  });
+
+  return rawSignals;
+}
+
+async function detectAndStoreSignals(scanResults) {
+  if (!scanResults?.length) return;
+  try {
+    dbOppSignals.expireOld();
+    const signals  = runAllDetectors(scanResults);
+    const scanTs   = state.scan.lastRun || new Date().toISOString();
+    const seen     = new Set();
+    for (const sig of signals) {
+      const key = `${sig.sym}|${sig.type}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dbOppSignals.upsert(sig.sym, sig.type, sig.payload, scanTs);
+    }
+    // Invalidate short-lived signals whose conditions are no longer present
+    const activeKeys = new Set(signals.map(s => `${s.sym}|${s.type}`));
+    const existing   = dbOppSignals.getActive(0, 300);
+    for (const e of existing) {
+      if (!activeKeys.has(`${e.sym}|${e.signal_type}`)) {
+        const def = SIGNAL_DEFS[e.signal_type];
+        if (def && def.halfLifeH <= 48) dbOppSignals.invalidate(e.sym, e.signal_type);
+      }
+    }
+  } catch(e) { console.error('[opp-signals]', e.message); }
+}
+
+// Alias kept for scan-complete hook
+const generateTopOpportunities = detectAndStoreSignals;
+
+
+// ── Strategy Validation Engine ────────────────────────────────────────────────
+// Tracks marked opportunities over time, measures outcomes at 1w/1m/3m/6m,
+// computes conviction calibration, signal decay, RSI edge, regime sensitivity.
+
+const MILESTONE_DAYS = { '1w': 7, '1m': 30, '3m': 90, '6m': 180 };
+
+async function updateMilestonesForTrack(track) {
+  try {
+    const yahooSym = toYahooSym(track.sym);
+    const bars     = await fetchYahooOHLCV(yahooSym, '1d', 250);
+    if (!bars?.length) return;
+
+    const entryDate  = new Date(track.tracked_at);
+    const pending    = dbMilestones.getPending(track.id);
+    let   mae = track.mae ?? 0, mfe = track.mfe ?? 0;
+
+    for (const m of pending) {
+      const mDate = new Date(m.target_date);
+      if (mDate > new Date()) continue; // still in the future
+
+      const periodBars = bars.filter(b => {
+        const d = new Date(b.time * 1000);
+        return d > entryDate && d <= mDate;
+      });
+      if (!periodBars.length) continue;
+
+      let status = 'recorded', exitPrice = null;
+      let peakPct = 0, drawdownPct = 0;
+
+      for (const bar of periodBars) {
+        const hi = (bar.high - track.entry_price) / track.entry_price * 100;
+        const lo = (bar.low  - track.entry_price) / track.entry_price * 100;
+        if (hi > peakPct)     peakPct     = hi;
+        if (lo < drawdownPct) drawdownPct = lo;
+        if (!exitPrice && track.stop    && bar.low  <= track.stop)    { exitPrice = track.stop;    status = 'hit_stop'; }
+        if (!exitPrice && track.target2 && bar.high >= track.target2)  { exitPrice = track.target2; status = 'hit_t2';   }
+        else if (!exitPrice && track.target1 && bar.high >= track.target1) { exitPrice = track.target1; status = 'hit_t1'; }
+      }
+
+      mae = Math.min(mae, drawdownPct);
+      mfe = Math.max(mfe, peakPct);
+
+      const finalPrice = exitPrice ?? periodBars[periodBars.length - 1].close;
+      const pnlPct     = (finalPrice - track.entry_price) / track.entry_price * 100;
+      const pnlSAR     = (track.simulated_capital ?? 20000) * pnlPct / 100;
+
+      dbMilestones.update(track.id, m.checkpoint, {
+        actual_date: mDate.toISOString().slice(0, 10),
+        price: +finalPrice.toFixed(4), pnl_pct: +pnlPct.toFixed(3),
+        pnl_sar: +pnlSAR.toFixed(2), drawdown_pct: +drawdownPct.toFixed(3),
+        peak_pct: +peakPct.toFixed(3), status,
+      });
+    }
+
+    dbTracked.updateExcursion(track.id, mae, mfe);
+
+    // Auto-close if stop hit or T2 reached across all milestones
+    const allMs = dbMilestones.getAll(track.id);
+    const stopped = allMs.find(m => m.status === 'hit_stop');
+    const hitT2   = allMs.find(m => m.status === 'hit_t2');
+    if ((stopped || hitT2) && track.status === 'tracking') {
+      dbTracked.close(track.id, stopped ? 'stopped' : 't2_hit',
+        stopped?.price ?? hitT2?.price, stopped?.actual_date ?? hitT2?.actual_date);
+    }
+  } catch(e) { /* ignore individual update failures */ }
+}
+
+async function refreshAllMilestones() {
+  const all = dbTracked.getAll().filter(t => t.status === 'tracking');
+  for (const t of all) {
+    await updateMilestonesForTrack(t);
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+
+function computeInsights() {
+  const all    = dbTracked.getAll();
+  const allMs  = dbMilestones.getAllForTracks(all.map(t => t.id));
+  const msMap  = {};
+  allMs.forEach(m => { if (!msMap[m.track_id]) msMap[m.track_id] = {}; msMap[m.track_id][m.checkpoint] = m; });
+
+  // Trades with ≥1 month data
+  const trades = all
+    .map(t => ({ ...t, ms: msMap[t.id] || {} }))
+    .filter(t => t.ms['1m']?.pnl_pct != null)
+    .map(t => ({ ...t, ret: t.ms['1m'].pnl_pct, win: t.ms['1m'].pnl_pct > 0 }));
+
+  if (trades.length < 3) return { insufficient: true, count: trades.length, needed: 3 };
+
+  // Signal type stats
+  const byType = {};
+  trades.forEach(t => { (byType[t.signal_type] = byType[t.signal_type] || []).push(t); });
+  const signalStats = Object.entries(byType).map(([type, ts]) => ({
+    type, count: ts.length,
+    winRate: Math.round(ts.filter(t => t.win).length / ts.length * 100),
+    avgRet:  +(ts.reduce((s, t) => s + t.ret, 0) / ts.length).toFixed(2),
+    avgWin:  +(ts.filter(t => t.win).reduce((s, t) => s + t.ret, 0) / Math.max(1, ts.filter(t => t.win).length)).toFixed(2),
+    avgLoss: +(ts.filter(t => !t.win).reduce((s, t) => s + t.ret, 0) / Math.max(1, ts.filter(t => !t.win).length)).toFixed(2),
+    avgMae:  +(ts.reduce((s, t) => s + (t.mae ?? 0), 0) / ts.length).toFixed(2),
+    avgMfe:  +(ts.reduce((s, t) => s + (t.mfe ?? 0), 0) / ts.length).toFixed(2),
+  })).sort((a, b) => b.winRate - a.winRate);
+
+  // Conviction calibration (predicted vs actual win rate)
+  const convBuckets = [
+    { label: '30–50', min: 30, max: 50 }, { label: '50–65', min: 50, max: 65 },
+    { label: '65–80', min: 65, max: 80 }, { label: '80+',   min: 80, max: 101 },
+  ];
+  const convCalibration = convBuckets.map(b => {
+    const ts = trades.filter(t => (t.conviction ?? 0) >= b.min && (t.conviction ?? 0) < b.max);
+    return { ...b, count: ts.length, actual: ts.length ? Math.round(ts.filter(t=>t.win).length/ts.length*100) : null };
+  });
+
+  // RSI edge (where does win rate peak?)
+  const rsiBuckets = [
+    { label: '<45', min: 0, max: 45 }, { label: '45–52', min: 45, max: 52 },
+    { label: '52–62', min: 52, max: 62 }, { label: '62–72', min: 62, max: 72 },
+    { label: '>72', min: 72, max: 100 },
+  ];
+  const rsiEdge = rsiBuckets.map(b => {
+    const ts = trades.filter(t => t.rsi != null && t.rsi >= b.min && t.rsi < b.max);
+    return { ...b, count: ts.length, winRate: ts.length ? Math.round(ts.filter(t=>t.win).length/ts.length*100) : null };
+  }).filter(b => b.count > 0);
+
+  // MFI edge
+  const mfiBuckets = [
+    { label: '<40', min: 0, max: 40 }, { label: '40–55', min: 40, max: 55 },
+    { label: '55–70', min: 55, max: 70 }, { label: '>70', min: 70, max: 101 },
+  ];
+  const mfiEdge = mfiBuckets.map(b => {
+    const ts = trades.filter(t => t.mfi != null && t.mfi >= b.min && t.mfi < b.max);
+    return { ...b, count: ts.length, winRate: ts.length ? Math.round(ts.filter(t=>t.win).length/ts.length*100) : null };
+  }).filter(b => b.count > 0);
+
+  // Regime sensitivity
+  const regimeStats = ['bull', 'bear', 'neutral'].map(regime => {
+    const ts = trades.filter(t => t.market_regime === regime);
+    return { regime, count: ts.length, winRate: ts.length ? Math.round(ts.filter(t=>t.win).length/ts.length*100) : null,
+      avgRet: ts.length ? +(ts.reduce((s,t)=>s+t.ret,0)/ts.length).toFixed(2) : null };
+  }).filter(r => r.count > 0);
+
+  // Signal decay (rolling 20-trade window vs lifetime)
+  const decayAlerts = [];
+  Object.entries(byType).forEach(([type, ts]) => {
+    if (ts.length < 8) return;
+    const lifetime = ts.filter(t=>t.win).length / ts.length;
+    const recent   = ts.slice(-Math.min(20, ts.length));
+    const recentWr = recent.filter(t=>t.win).length / recent.length;
+    if (lifetime - recentWr > 0.15)
+      decayAlerts.push({ type, lifetime: Math.round(lifetime*100), recent: Math.round(recentWr*100), drop: Math.round((lifetime-recentWr)*100) });
+  });
+
+  // Time-decay: at what point do winners peak?
+  const timeReturn = ['1w','1m','3m','6m'].map(cp => {
+    const ts = trades.filter(t => t.ms[cp]?.pnl_pct != null).map(t => t.ms[cp].pnl_pct);
+    return { cp, count: ts.length, avg: ts.length ? +(ts.reduce((a,b)=>a+b,0)/ts.length).toFixed(2) : null };
+  }).filter(t => t.count > 0);
+
+  return {
+    totalTrades: trades.length,
+    overallWinRate: Math.round(trades.filter(t=>t.win).length/trades.length*100),
+    overallAvgRet: +(trades.reduce((s,t)=>s+t.ret,0)/trades.length).toFixed(2),
+    totalCapitalPnl: +trades.reduce((s,t) => s + ((t.simulated_capital??20000)*t.ret/100), 0).toFixed(0),
+    signalStats, convCalibration, rsiEdge, mfiEdge, regimeStats, decayAlerts, timeReturn,
+  };
+}
+
+// Generates a plain-language post-mortem note when a track closes
+function generatePostMortem(track, milestones) {
+  const m1 = milestones.find(m => m.checkpoint === '1m');
+  if (!m1?.pnl_pct) return null;
+  const outcome = m1.pnl_pct > 0 ? 'WIN' : 'LOSS';
+  const flags = [];
+  if (track.rsi > 70)                       flags.push(`RSI ${track.rsi.toFixed(1)} was overbought at entry (>70 underperforms)`);
+  if (track.rsi < 52 && outcome === 'LOSS') flags.push(`RSI ${track.rsi?.toFixed(1)} below 52 — bullish threshold not confirmed`);
+  if ((track.vol_ratio ?? 0) < 1.0)         flags.push(`Volume ${track.vol_ratio}× below average at entry — weak confirmation`);
+  if (track.market_regime === 'bear')        flags.push('Market regime was bearish — this signal underperforms in bear regimes');
+  if ((track.whale_score ?? 0) < 4)         flags.push('Whale score below 4 — limited institutional backing');
+  if (m1.drawdown_pct < -8)                 flags.push(`Touched -${Math.abs(m1.drawdown_pct.toFixed(1))}% before recovery — stop was appropriate`);
+  const verdict = flags.length
+    ? `${flags.length} flag${flags.length>1?'s':''} at entry: ${flags.join('; ')}.`
+    : `Entry indicators were aligned — ${outcome === 'LOSS' ? 'market context worked against the setup' : 'all conditions confirmed the move'}.`;
+  return `${track.signal_type} on ${track.sym} — ${outcome} (${m1.pnl_pct.toFixed(2)}% / ${m1.pnl_sar?.toFixed(0)} SAR). ${verdict}`;
+}
+
+// ── Insider Buy Auto-Fetcher ───────────────────────────────────────────────────
+// Scrapes Argaam for news articles about directors/executives buying shares in
+// their own company. Uses Arabic keyword matching to distinguish director
+// transactions from institutional major-shareholding changes (CMA filings).
+
+const INSIDER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml',
+  'Accept-Language': 'ar,en;q=0.8',
+  'Referer': 'https://www.argaam.com/',
+};
+
+const DIRECTOR_KW = ['عضو مجلس الإدارة','رئيس مجلس الإدارة','المدير التنفيذي','الرئيس التنفيذي','المدير العام','رئيس تنفيذي','عضو مجلس','رئيس مجلس'];
+const BUY_KW      = ['اشترى','اشترت','اقتنى','اقتنت','تملّك','تملك','ابتاع'];
+
+function parseInsiderArticle(html, fallbackDate) {
+  const text = html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ');
+
+  // Shares count is mandatory — no shares = not a transaction disclosure
+  const sharesPat = /([\d,]{2,})\s*(?:سهم|أسهم)/g;
+  const sharesArr = [...text.matchAll(sharesPat)].map(m => parseInt(m[1].replace(/,/g,'')));
+  const shares    = sharesArr.length ? Math.max(...sharesArr) : 0;
+  if (!shares) return null;  // no share count → skip (it's an interview/opinion)
+
+  // Must contain a buy keyword within 300 chars of the shares figure
+  let hasBuyNearShares = false;
+  for (const bKw of BUY_KW) {
+    const bIdx = text.indexOf(bKw);
+    if (bIdx === -1) continue;
+    const sIdx = text.search(/([\d,]{2,})\s*(?:سهم|أسهم)/);
+    if (Math.abs(bIdx - sIdx) < 400) { hasBuyNearShares = true; break; }
+  }
+  if (!hasBuyNearShares) return null;
+
+  // Must mention a director/executive role
+  const hasDirector = DIRECTOR_KW.some(kw => text.includes(kw));
+  if (!hasDirector) return null;
+
+  // TASI 4-digit code
+  const codeMatches = [...text.matchAll(/\b(\d{4})\b/g)].map(m => m[1]);
+  const tasiCode    = codeMatches.find(c => +c >= 1010 && +c <= 9999);
+  if (!tasiCode) return null;
+
+  // Role + person name
+  let role = 'Director', person = 'Unknown';
+  for (const rKw of DIRECTOR_KW) {
+    const idx = text.indexOf(rKw);
+    if (idx === -1) continue;
+    role = rKw;
+    const before = text.slice(Math.max(0, idx - 80), idx).trim();
+    const nameM  = before.match(/([^\d،,،]{4,35})\s*$/);
+    if (nameM) { person = nameM[1].trim(); break; }
+    const after  = text.slice(idx + rKw.length, idx + rKw.length + 80).trim();
+    const nameM2 = after.match(/^[\s،,،]*([^\d،,،]{4,35}?)(?:\s+اشترى|\s+اقتنى|\s+في|\s+شركة|$)/);
+    if (nameM2) { person = nameM2[1].trim(); break; }
+    break;
+  }
+  if (!person || person.length < 3 || /^\d/.test(person)) person = 'Director';
+
+  // Price
+  const pricePat = /(\d{1,3}(?:\.\d{1,3})?)\s*(?:ريال|SAR|ر\.س)/g;
+  const priceArr = [...text.matchAll(pricePat)].map(m => parseFloat(m[1]));
+  const price    = priceArr.length ? priceArr[0] : 0;
+
+  // Date from JSON-LD or <time>
+  const datePat = /"datePublished"\s*:\s*"([^"]+)"|<time[^>]+datetime="([^"]+)"/;
+  const dm      = html.match(datePat);
+  const date    = dm
+    ? (dm[1] || dm[2]).slice(0,10).replace(/\//g,'-')
+    : (fallbackDate || new Date().toISOString().slice(0,10));
+
+  // Company Arabic name from <h1>
+  const h1M = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  const name = h1M ? h1M[1].trim().slice(0,60) : `TADAWUL:${tasiCode}`;
+
+  return {
+    sym:    `TADAWUL:${tasiCode}`,
+    name,
+    person: person.slice(0,60),
+    role:   role.slice(0,40),
+    shares,
+    price,
+    value:  shares * price,
+    date,
+  };
+}
+
+// RSS feed slugs that carry company disclosure articles
+const ARGAAM_RSS_FEEDS = [
+  '/ar/rss/ho-main-news?sectionid=1523',
+  '/ar/rss/breaking-news?sectionid=1585',
+  '/ar/rss/companies?sectionid=1543',
+];
+
+async function fetchArgaamInsiderBuys() {
+  const BASE     = 'https://www.argaam.com';
+  const todayKSA = new Date(Date.now() + 3*3600000).toISOString().slice(0,10);
+  const buys     = [];
+  const seen     = new Set();
+  const articleIds = new Set();
+
+  // 1. Collect article IDs from RSS feeds
+  for (const feed of ARGAAM_RSS_FEEDS) {
+    try {
+      const res = await fetch(`${BASE}${feed}`, { headers: INSIDER_HEADERS, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const xml = await res.text();
+      for (const m of xml.matchAll(/articledetail\/id\/(\d+)/g)) articleIds.add(m[1]);
+    } catch(_) {}
+  }
+
+  // 2. Also scan the block-deal tag page since directors sometimes buy the same day
+  try {
+    const bdRes = await fetch(`${BASE}/ar/tags/id/24779/1/`, { headers: INSIDER_HEADERS, signal: AbortSignal.timeout(10000) });
+    if (bdRes.ok) {
+      const html = await bdRes.text();
+      for (const m of html.matchAll(/articledetail\/id\/(\d+)/g)) articleIds.add(m[1]);
+    }
+  } catch(_) {}
+
+  // 3. Fetch each article and filter for director buying content
+  for (const articleId of [...articleIds].slice(0, 40)) {
+    try {
+      const aUrl = `${BASE}/ar/article/articledetail/id/${articleId}`;
+      const aRes = await fetch(aUrl, { headers: INSIDER_HEADERS, signal: AbortSignal.timeout(12000) });
+      if (!aRes.ok) continue;
+      const aHtml = await aRes.text();
+
+      const parsed = parseInsiderArticle(aHtml, todayKSA);
+      if (!parsed) continue;
+
+      const key = `${parsed.sym}|${parsed.person}|${parsed.date}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      buys.push({ ...parsed, source: 'argaam', source_url: aUrl, added: new Date().toISOString() });
+      await new Promise(r => setTimeout(r, 300));
+    } catch(_) {}
+    if (buys.length >= 15) break;
+  }
+  return buys;
+}
+
+async function fetchTadawulInsiderDeals() {
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    'Accept': 'application/json,text/html',
+    'Referer': 'https://www.saudiexchange.com.sa/',
+  };
+  const URLS = [
+    'https://data.saudiexchange.com.sa/api/v1/announcements?type=insider&limit=30',
+    'https://data.saudiexchange.com.sa/api/v1/announcements?category=insider_dealing&limit=30',
+  ];
+  const buys    = [];
+  const todayKSA = new Date(Date.now() + 3*3600000).toISOString().slice(0,10);
+
+  for (const url of URLS) {
+    try {
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const rows = data.data || data.announcements || data.results || [];
+      for (const row of rows) {
+        const sym = row.symbol ? `TADAWUL:${row.symbol}` : null;
+        if (!sym) continue;
+        const direction = (row.transactionType || '').toLowerCase();
+        if (!direction.includes('buy') && !direction.includes('purchase') && !direction.includes('acquire')) continue;
+        buys.push({
+          sym,
+          name:    row.company || row.companyName || sym,
+          person:  row.insiderName || row.personName || 'Director',
+          role:    row.position || row.role || 'Insider',
+          shares:  row.shares || row.quantity || 0,
+          price:   row.price || 0,
+          value:   (row.shares || 0) * (row.price || 0),
+          date:    (row.date || row.filing_date || todayKSA).slice(0,10),
+          source:  'tadawul',
+          added:   new Date().toISOString(),
+        });
+      }
+      if (buys.length) break;
+    } catch(_) {}
+  }
+  return buys;
+}
+
+let insiderRefreshTs = 0;
+const INSIDER_TTL = 4 * 3600 * 1000;
+
+async function fetchAndStoreInsiderBuys() {
+  const now = Date.now();
+  if (now - insiderRefreshTs < INSIDER_TTL) {
+    return { ok: true, skipped: true, message: 'Rate-limited — last refresh < 4h ago' };
+  }
+  insiderRefreshTs = now;
+
+  let newCount = 0;
+  const errors = [];
+  const sources = [
+    { name: 'Tadawul', fn: fetchTadawulInsiderDeals },
+    { name: 'Argaam',  fn: fetchArgaamInsiderBuys   },
+  ];
+
+  for (const src of sources) {
+    try {
+      const buys = await src.fn();
+      for (const b of buys) {
+        try {
+          if (!dbInsiderBuys.exists(b.sym, b.person, b.date)) {
+            dbInsiderBuys.add(b);
+            newCount++;
+          }
+        } catch(_) {}
+      }
+      if (newCount > 0) break;
+    } catch(e) {
+      errors.push(`${src.name}: ${e.message}`);
+    }
+  }
+
+  return {
+    ok: true,
+    new_buys: newCount,
+    errors:   errors.length ? errors : undefined,
+    message:  newCount > 0
+      ? `${newCount} new insider buy(s) found`
+      : 'No new insider buys found — add manually if you have CMA data',
+  };
+}
+
+// Auto-run at startup
+fetchAndStoreInsiderBuys().catch(() => {});
+
+// ── CMA Filing Fetcher ─────────────────────────────────────────────────────────
+// Sources tried in order:
+//   1. Argaam Arabic ownership-disclosure articles (same scraper pattern as block deals)
+//   2. Saudi Exchange announcement search (HTML, non-JS-rendered path)
+//   3. Manual entry (always available via POST /api/cma/filings/add)
+
+const KNOWN_INSTITUTIONS = {
+  'صندوق الاستثمارات العامة': 'Public Investment Fund (PIF)',
+  'صندوق التقاعد': 'General Organization for Social Insurance (GOSI)',
+  'مؤسسة التأمينات الاجتماعية': 'General Organization for Social Insurance (GOSI)',
+  'بنك الراجحي': 'Al Rajhi Bank',
+  'شركة أرامكو': 'Saudi Aramco',
+  'بنك الأهلي': 'SNB (Saudi National Bank)',
+  'مجموعة سلامة': 'Salama Insurance',
+  'صناديق الاستثمار': 'Investment Funds',
+  'سنابل': 'Sanabil Investments (PIF)',
+  'الشركة الوطنية': 'National Company',
+};
+
+function mapInstitution(arabicName) {
+  for (const [ar, en] of Object.entries(KNOWN_INSTITUTIONS)) {
+    if (arabicName && arabicName.includes(ar)) return en;
+  }
+  return null;
+}
+
+// Resolve a company Arabic name to a TASI sym via the scan universe
+function resolveSymFromName(arabicName, scanResults) {
+  if (!arabicName || !scanResults?.length) return null;
+  const clean = arabicName.replace(/\s+/g,' ').trim();
+  for (const r of scanResults) {
+    if (r.ar && clean.includes(r.ar.substring(0,6))) return r.sym;
+    if (r.name && clean.toLowerCase().includes(r.name.toLowerCase().substring(0,6))) return r.sym;
+  }
+  return null;
+}
+
+// Parse a single CMA filing from Arabic article HTML
+function parseCMAFilingHtml(html, fallbackDate) {
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g,' ');
+
+  // Direction keywords (Arabic)
+  const boughtKw = ['اشترى','اشترت','اقتنى','اقتنت','أضاف','أضافت','ارتفعت','زيادة','رفعت','يمتلك الآن'];
+  const soldKw   = ['باع','باعت','تخلص','تخلصت','خفض','خفضت','انخفضت','نقصت','تراجعت'];
+  const pledgeKw = ['رهن','رهنت','تعهد'];
+
+  const hasBought = boughtKw.some(kw => text.includes(kw));
+  const hasSold   = soldKw.some(kw => text.includes(kw));
+  const hasPledge = pledgeKw.some(kw => text.includes(kw));
+
+  let direction = 'unknown';
+  if (hasBought && !hasSold)   direction = 'buy';
+  else if (hasSold && !hasBought) direction = 'sell';
+  else if (hasPledge && !hasBought && !hasSold) direction = 'pledge';
+  else if (hasBought) direction = 'buy'; // prefer buy if ambiguous
+
+  // Extract percentages — CMA filings always list prev% and new%
+  // Accepts both Arabic ٪ and Latin %
+  const pctPat = /(\d{1,2}(?:[.,]\d{1,4})?)\s*(?:%|٪)/g;
+  const pcts = [...text.matchAll(pctPat)]
+    .map(m => parseFloat(m[1].replace(',','.')))
+    .filter(p => p > 0 && p < 100);
+
+  let prev_pct = null, new_pct = null;
+  if (pcts.length >= 2) {
+    // Direction-based assignment: higher % → result of buy; lower → result of sell
+    if (direction === 'buy') {
+      prev_pct = Math.min(...pcts.slice(0,3));
+      new_pct  = Math.max(...pcts.slice(0,3));
+    } else if (direction === 'sell') {
+      prev_pct = Math.max(...pcts.slice(0,3));
+      new_pct  = Math.min(...pcts.slice(0,3));
+    } else {
+      [prev_pct, new_pct] = pcts;
+    }
+  } else if (pcts.length === 1) {
+    new_pct = pcts[0];
+  }
+
+  // Extract institution name — text before the action verb
+  let institution = null;
+  for (const kw of [...boughtKw, ...soldKw]) {
+    const idx = text.indexOf(kw);
+    if (idx > 20) {
+      // Take the 40 chars before the verb, clean up
+      const before = text.slice(Math.max(0, idx - 60), idx).trim();
+      // Find last noun-phrase (after "أن" or "شركة" or at word boundary)
+      const m = before.match(/(?:أن\s+|شركة\s+|صندوق\s+|مؤسسة\s+)(.{5,50})$/);
+      institution = m ? m[1].trim() : before.slice(-40).trim();
+      break;
+    }
+  }
+
+  // Extract date from article JSON-LD or <time> tag
+  const datePat = /"datePublished"\s*:\s*"([^"]+)"|<time[^>]+datetime="([^"]+)"/;
+  const dm = html.match(datePat);
+  const filing_date = dm
+    ? (dm[1]||dm[2]).slice(0,10).replace(/\//g,'-')
+    : (fallbackDate || new Date().toISOString().slice(0,10));
+
+  // Extract shares changed (look for numbers followed by سهم/أسهم)
+  const sharesPat = /([\d,]+)\s+سهم/g;
+  const sharesMatches = [...text.matchAll(sharesPat)].map(m => parseInt(m[1].replace(/,/g,'')));
+  const shares_delta = sharesMatches.length > 0
+    ? (direction === 'buy' ? 1 : -1) * Math.max(...sharesMatches)
+    : null;
+
+  return { direction, institution, institution_en: mapInstitution(institution),
+           prev_pct, new_pct, shares_delta, filing_date,
+           raw_text: text.slice(0, 500) };
+}
+
+async function fetchArgaamCMAFilings() {
+  const BASE    = 'https://www.argaam.com';
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml',
+    'Accept-Language': 'ar,en;q=0.8',
+    'Referer': 'https://www.argaam.com/',
+  };
+  const todayKSA = new Date(Date.now() + 3 * 3600000).toISOString().slice(0,10);
+
+  // Argaam tag IDs for CMA ownership disclosures
+  // Tag 24779 = block deals (known). Tag 24780 and nearby cover ownership changes.
+  // We try several candidate IDs and use whichever returns relevant articles.
+  const CANDIDATE_TAGS = [
+    { id: 1055, slug: '%D8%A5%D9%81%D8%B5%D8%A7%D8%AD%D8%A7%D8%AA' },       // إفصاحات
+    { id: 24780, slug: '%D9%85%D9%84%D9%83%D9%8A%D8%A9' },                    // ملكية
+    { id: 1050, slug: '%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D9%87%D9%85%D9%88%D9%86' }, // المساهمون
+  ];
+
+  const filings = [];
+  const seenKeys = new Set();
+
+  for (const tag of CANDIDATE_TAGS) {
+    try {
+      const tagUrl = `${BASE}/ar/tags/id/${tag.id}/1/${tag.slug}`;
+      const res = await fetch(tagUrl, { headers: HEADERS, signal: AbortSignal.timeout(12000) });
+      if (!res.ok) continue;
+      const tagHtml = await res.text();
+
+      // Only proceed if this tag page contains ownership-related Arabic keywords
+      const isOwnershipTag = ['ملكية','مساهم','إفصاح','حصة'].some(kw => tagHtml.includes(kw));
+      if (!isOwnershipTag) continue;
+
+      // Extract article IDs
+      const ids = [...new Set([...tagHtml.matchAll(/\/ar\/article\/articledetail\/id\/(\d+)/g)].map(m=>m[1]))];
+      if (!ids.length) continue;
+
+      for (const articleId of ids.slice(0, 10)) {
+        try {
+          const aUrl = `${BASE}/ar/article/articledetail/id/${articleId}`;
+          const aRes = await fetch(aUrl, { headers: HEADERS, signal: AbortSignal.timeout(12000) });
+          if (!aRes.ok) continue;
+          const aHtml = await aRes.text();
+
+          // Article relevance: must contain ownership-related terms
+          const isOwnershipArticle = ['ملكية','إفصاح','حصة','مساهم'].some(kw => aHtml.includes(kw));
+          if (!isOwnershipArticle) continue;
+
+          // Extract company sym from article — look for stock codes
+          const codeMatches = [...aHtml.matchAll(/\b(\d{4})\b/g)].map(m=>m[1]);
+          const tasiCode = codeMatches.find(c => parseInt(c) >= 1010 && parseInt(c) <= 9999);
+          const sym = tasiCode ? `TADAWUL:${tasiCode}` : null;
+          if (!sym) continue;
+
+          // Extract company Arabic name
+          const arNameMatch = aHtml.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+          const company_ar = arNameMatch ? arNameMatch[1].trim() : null;
+
+          const parsed = parseCMAFilingHtml(aHtml, todayKSA);
+          const key = `${sym}|${parsed.institution}|${parsed.filing_date}`;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+
+          if (parsed.direction !== 'unknown' && parsed.filing_date) {
+            filings.push({
+              sym, company_ar, ...parsed,
+              source: 'argaam', source_url: aUrl, verified: 0,
+            });
+          }
+          await new Promise(r => setTimeout(r, 300));
+        } catch (_) {}
+      }
+      if (filings.length >= 10) break;
+      await new Promise(r => setTimeout(r, 500));
+    } catch (_) {}
+  }
+
+  return filings;
+}
+
+// Saudi Exchange announcement scraper for "Major Shareholding" disclosures
+async function fetchTadawulCMAFilings() {
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/json',
+    'Accept-Language': 'en,ar;q=0.8',
+    'Referer': 'https://www.saudiexchange.com.sa/',
+  };
+  // Saudi Exchange announcement search for Major Shareholding type (type code varies by year)
+  // Try their open data endpoint
+  const URLS = [
+    'https://www.saudiexchange.com.sa/wps/portal/tadawul/market-participants/investors/shareholding-disclosure/',
+    'https://data.saudiexchange.com.sa/api/v1/announcements?type=shareholding&limit=20',
+  ];
+
+  const filings = [];
+  const todayKSA = new Date(Date.now() + 3 * 3600000).toISOString().slice(0,10);
+
+  for (const url of URLS) {
+    try {
+      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const body = await res.text();
+
+      // Try JSON parse first
+      try {
+        const data = JSON.parse(body);
+        const rows = data.data || data.announcements || data.results || [];
+        for (const row of rows) {
+          const sym = row.symbol ? `TADAWUL:${row.symbol}` : null;
+          if (!sym) continue;
+          const direction = row.change > 0 ? 'buy' : row.change < 0 ? 'sell' : 'unknown';
+          filings.push({
+            sym,
+            company: row.company || row.name || null,
+            institution: row.shareholder || row.holder || 'Unknown',
+            prev_pct: row.previousPercentage ?? null,
+            new_pct:  row.newPercentage ?? null,
+            direction,
+            filing_date: (row.date||row.filing_date||todayKSA).slice(0,10),
+            source: 'tadawul', source_url: url, verified: 1,
+          });
+        }
+        if (filings.length) break;
+      } catch (_) {
+        // Not JSON — try HTML parsing
+        // Look for table rows with stock codes and ownership percentages
+        const rowPat = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+        let m;
+        while ((m = rowPat.exec(body)) !== null) {
+          const cells = [...m[1].matchAll(/<td[^>]*>([^<]+)<\/td>/g)].map(c=>c[1].trim());
+          if (cells.length < 4) continue;
+          const codeCell = cells.find(c => /^\d{4}$/.test(c));
+          if (!codeCell) continue;
+          const pcts = cells.filter(c => /^\d{1,2}\.\d+$/.test(c)).map(Number);
+          if (pcts.length < 2) continue;
+          const direction = pcts[1] > pcts[0] ? 'buy' : 'sell';
+          filings.push({
+            sym: `TADAWUL:${codeCell}`,
+            institution: cells[1] || 'Unknown',
+            prev_pct: pcts[0], new_pct: pcts[1], direction,
+            filing_date: todayKSA, source: 'tadawul', source_url: url, verified: 0,
+          });
+        }
+        if (filings.length) break;
+      }
+    } catch (_) {}
+  }
+  return filings;
+}
+
+let cmaRefreshTs = 0;
+const CMA_REFRESH_TTL = 4 * 3600 * 1000; // refresh at most every 4 hours
+
+async function fetchAndStoreCMAFilings() {
+  const now = Date.now();
+  if (now - cmaRefreshTs < CMA_REFRESH_TTL) {
+    return { ok: true, skipped: true, message: 'Rate-limited — last refresh < 4h ago' };
+  }
+  cmaRefreshTs = now;
+
+  let newCount = 0;
+  const errors = [];
+
+  // Try Tadawul first (structured), then Argaam (NLP scraping)
+  const sources = [
+    { name: 'Tadawul', fn: fetchTadawulCMAFilings },
+    { name: 'Argaam',  fn: fetchArgaamCMAFilings  },
+  ];
+
+  for (const src of sources) {
+    try {
+      const filings = await src.fn();
+      for (const f of filings) {
+        try {
+          if (!dbCMA.exists(f.sym, f.institution||'Unknown', f.filing_date)) {
+            dbCMA.insert(f);
+            newCount++;
+          }
+        } catch (_) {}
+      }
+      if (newCount > 0) break; // first source that yields data wins
+    } catch (e) {
+      errors.push(`${src.name}: ${e.message}`);
+    }
+  }
+
+  return {
+    ok: true, new_filings: newCount,
+    errors: errors.length ? errors : undefined,
+    message: newCount > 0 ? `${newCount} new CMA filings stored` : 'No new filings found — use manual entry if you have CMA data',
+  };
+}
+
+// Auto-refresh CMA filings once per day at startup and after each scan
+fetchAndStoreCMAFilings().catch(() => {});
 
 server.listen(PORT, () => {
   console.log(`\n  TASI Strategy Dashboard`);
