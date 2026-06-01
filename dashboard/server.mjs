@@ -558,6 +558,26 @@ function updateScoreHistory(results) {
     state.score_history[r.sym].push(entry);
     state.score_history[r.sym] = state.score_history[r.sym].slice(-15);
   });
+
+  // Log market index regime to score_history for daily context
+  if (results.length > 0) {
+    const sampleRegime = results[0]?.market_regime || 'neutral';
+    const firstSym = results[0]?.sym || '';
+    const mktKey = firstSym.startsWith('TADAWUL:') ? 'tasi'
+                 : firstSym.match(/XRP|BTC|ETH|SOL|BNB/) ? 'crypto'
+                 : ['TVC:', 'NYMEX:', 'COMEX:'].some(p => firstSym.startsWith(p)) ? 'commodity' : 'us';
+    const idxSym     = INDEX_FOR_MARKET[mktKey] || INDEX_FOR_MARKET.tasi;
+    const regimeScore = sampleRegime === 'bull' ? 8 : sampleRegime === 'bear' ? 2 : 5;
+    const regimeBias  = sampleRegime === 'bull' ? 'BUY' : sampleRegime === 'bear' ? 'SELL' : 'SKIP';
+
+    const idxEntry = { d: date, s: regimeScore, m: 9, b: regimeBias, p: null,
+      md: 'index', vc: 0, rb: 0, wh: 0 };
+    dbScoreHistory.upsert(idxSym, idxEntry);
+    if (!state.score_history[idxSym]) state.score_history[idxSym] = [];
+    state.score_history[idxSym] = state.score_history[idxSym].filter(h => h.d !== date);
+    state.score_history[idxSym].push(idxEntry);
+    state.score_history[idxSym] = state.score_history[idxSym].slice(-15);
+  }
 }
 
 function autoLogAccuracySignals(results) {
