@@ -848,31 +848,29 @@ export const accuracyLab = {
     return stale.length;
   },
 
+  // Direction is derived from the entry/stop geometry, NOT the (possibly re-labeled)
+  // bias string — a long has stop < entry, a short has stop > entry. R is signed so
+  // a stop is always negative and a target always positive, for both directions.
   checkPriceOutcomes(scanResults) {
     const active = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NULL").all();
     for (const sig of active) {
       const r = scanResults.find(x => x.sym === sig.sym);
       if (!r?.price) continue;
       const price = r.price;
-      const isBear = ['STRONG SELL','SELL','AVOID'].includes(sig.bias);
-      const atStop = isBear ? price >= sig.price_stop : price <= sig.price_stop;
-      const atT1   = isBear ? price <= sig.price_t1  : price >= sig.price_t1;
-      const atT2   = isBear ? price <= sig.price_t2  : price >= sig.price_t2;
+      if (!sig.price_entry || !sig.price_stop) continue;
+      const isLong = sig.price_stop < sig.price_entry;
+      const dir    = isLong ? 1 : -1;
+      const risk   = Math.abs(sig.price_entry - sig.price_stop);
+      const rAt    = (p) => risk ? +((dir * (p - sig.price_entry)) / risk).toFixed(2) : (dir * (p - sig.price_entry) >= 0 ? 1 : -1);
+      const atStop = isLong ? price <= sig.price_stop : price >= sig.price_stop;
+      const atT2   = isLong ? price >= sig.price_t2  : price <= sig.price_t2;
+      const atT1   = isLong ? price >= sig.price_t1  : price <= sig.price_t1;
       if (sig.price_stop && atStop) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((sig.price_stop - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : -1;
-        this.updateOutcome(sig.id, { outcome: 'stop', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 'stop', price_outcome: price, r_multiple: rAt(price) });
       } else if (sig.price_t2 && atT2) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : 2;
-        this.updateOutcome(sig.id, { outcome: 't2', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 't2', price_outcome: price, r_multiple: rAt(price) });
       } else if (sig.price_t1 && atT1) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : 1;
-        this.updateOutcome(sig.id, { outcome: 't1', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 't1', price_outcome: price, r_multiple: rAt(price) });
       }
     }
   },
