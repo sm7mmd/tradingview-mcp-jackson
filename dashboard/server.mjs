@@ -22,6 +22,7 @@ import * as chartCore from "../src/core/chart.js";
 import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
+import { getCalibration, calibrateSignal } from "./calibration.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -2566,6 +2567,21 @@ const server = createServer(async (req, res) => {
       const horizons = {};
       for (const h of VAL_HORIZONS) horizons[h] = getValidationStats({ horizon: h });
       return json(res, { ok: true, headline_horizon: 20, horizons });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
+  // Wilson confidence intervals. ?horizon=N (default 20). ?type=&score= for a single lookup.
+  if (path === '/api/lab/calibration' && method === 'GET') {
+    try {
+      const horizon = +url.searchParams.get('horizon') || 20;
+      const type = url.searchParams.get('type');
+      if (type) {
+        const score = url.searchParams.get('score') != null ? +url.searchParams.get('score') : null;
+        const regime = url.searchParams.get('regime') || null;
+        return json(res, { ok: true, signal: calibrateSignal({ signal_type: type, score, regime, horizon }) });
+      }
+      return json(res, { ok: true, ...getCalibration({ horizon }) });
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 

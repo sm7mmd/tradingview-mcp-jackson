@@ -11230,6 +11230,46 @@ async function loadLabValidation() {
       ${typeRows ? `<div class="lab-table-wrap"><table class="lab-table">
         <thead><tr><th>Signal Type (@${HH}-session)</th><th style="text-align:end">Excess</th><th style="text-align:end">Net</th><th style="text-align:end">Beat</th><th style="text-align:end">n</th></tr></thead>
         <tbody>${typeRows}</tbody></table></div>` : ''}
+      <div id="lab-calibration-block"></div>
+    </div>`;
+    loadLabCalibration(HH);
+  } catch(_) {}
+}
+
+// Per-pick odds: empirical P(profit) and P(beat buy-and-hold) with sample-size honesty.
+async function loadLabCalibration(headlineHorizon) {
+  const el = document.getElementById('lab-calibration-block');
+  if (!el) return;
+  try {
+    // headline horizon may have nothing graded yet — fall back to the longest horizon with data
+    let horizon = headlineHorizon, d = await fetch(`/api/lab/calibration?horizon=${horizon}`).then(r => r.json());
+    if (!d.ok || !d.graded) { for (const h of [10, 5]) { const f = await fetch(`/api/lab/calibration?horizon=${h}`).then(r => r.json()); if (f.ok && f.graded) { d = f; horizon = h; break; } } }
+    if (!d.ok || !d.graded) { el.innerHTML = `<div style="font-size:10px;color:var(--text3);margin-top:10px">Per-pick odds unlock once signals are graded (${d.pending || 0} maturing).</div>`; return; }
+
+    const pp = v => v == null ? '—' : Math.round(v * 100) + '%';
+    const ov = d.overall;
+    const interim = horizon !== headlineHorizon ? ` <span style="color:var(--text3);font-weight:400">(interim — ${horizon}-session; ${headlineHorizon}-session still maturing)</span>` : '';
+    const profCol = ov.p_profit >= 0.5 ? 'var(--green)' : 'var(--yellow)';
+    const beatCol = ov.p_beat >= 0.5 ? 'var(--green)' : '#ff5252';
+
+    const rows = Object.entries(d.by_type).sort((a, b) => (b[1].p_beat||0) - (a[1].p_beat||0)).map(([k, v]) => `<tr style="${v.reliable ? '' : 'opacity:.5'}">
+      <td style="font-size:11px;font-weight:600;color:var(--text)">${k}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:${v.p_profit>=0.5?'var(--green)':'var(--yellow)'}">${pp(v.p_profit)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;font-weight:700;color:${v.p_beat>=0.5?'var(--green)':'#ff5252'}">${pp(v.p_beat)}</td>
+      <td style="font-size:10px;color:var(--text3);text-align:end">±${Math.round((v.ci_beat[1]-v.ci_beat[0])/2*100)}%</td>
+      <td style="font-size:10px;color:var(--text3);text-align:end">${v.n}${v.reliable?'':' ⚠'}</td>
+    </tr>`).join('');
+
+    el.innerHTML = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:2px">Per-Pick Odds${interim}</div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px">What an individual STRONG BUY pick actually does. <strong>"% beat hold" is the honest one</strong> — "% profit" rides the market and flatters in an up year.</div>
+      <div class="lab-stats-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="lab-stat"><div class="lab-stat-val" style="font-size:24px;color:${profCol}">${pp(ov.p_profit)}</div><div class="lab-stat-lbl">made any profit</div><div style="font-size:9px;color:var(--text3);margin-top:3px">CI ${pp(ov.ci_profit[0])}–${pp(ov.ci_profit[1])} · n=${ov.n}</div></div>
+        <div class="lab-stat" style="border-color:var(--accent)"><div class="lab-stat-val" style="font-size:24px;color:${beatCol}">${pp(ov.p_beat)}</div><div class="lab-stat-lbl">beat buy-and-hold ★</div><div style="font-size:9px;color:var(--text3);margin-top:3px">CI ${pp(ov.ci_beat[0])}–${pp(ov.ci_beat[1])}</div></div>
+      </div>
+      <div class="lab-table-wrap" style="margin-top:10px"><table class="lab-table">
+        <thead><tr><th>Signal Type</th><th style="text-align:end">P(profit)</th><th style="text-align:end">P(beat)</th><th style="text-align:end">±CI</th><th style="text-align:end">n</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
     </div>`;
   } catch(_) {}
 }
