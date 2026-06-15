@@ -13,7 +13,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "dashboard": "node --experimental-sqlite dashboard/server.mjs",
+    "dashboard": "node --experimental-sqlite -r dotenv/config dashboard/server.mjs dotenv_config_path=.env",
     "tv": "node src/cli/index.js",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
@@ -28,5 +28,11 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chrome-remote-interface": "^0.33.2",
     "dotenv": "^17.4.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }
