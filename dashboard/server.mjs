@@ -3,8 +3,8 @@
  * Usage: node dashboard/server.mjs
  */
 
-// Load .env from repo root (graceful: no error if missing or dotenv not installed)
-try { const { createRequire } = await import('node:module'); createRequire(import.meta.url)('dotenv').config({ path: new URL('../.env', import.meta.url).pathname }); } catch (_) {}
+// .env is loaded via `node -r dotenv/config` in the npm script (preloads before
+// ESM eval, so env vars are present when imported modules initialize).
 
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -21,6 +21,7 @@ import { getShariaStatus, getAllStatuses } from "./sharia.mjs";
 import * as chartCore from "../src/core/chart.js";
 import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
+import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -578,6 +579,28 @@ function updateScoreHistory(results) {
     state.score_history[idxSym].push(idxEntry);
     state.score_history[idxSym] = state.score_history[idxSym].slice(-15);
   }
+}
+
+// ── Validation spine: sync signals + grade matured outcomes vs equal-weight basket ──
+let _valLastRun = null;
+const _valBarsCache = new Map();
+async function _valGetBars(sym) {
+  if (_valBarsCache.has(sym)) return _valBarsCache.get(sym);
+  let b = [];
+  try { b = (await fetchYahooOHLCV(toYahooSym(sym), '1d', 520)).map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), close: x.close })); } catch {}
+  _valBarsCache.set(sym, b); return b;
+}
+// Run at most once per calendar day (grading only changes as new daily bars print).
+async function runValidationGradeThrottled() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (_valLastRun === today) return;
+  _valLastRun = today;
+  try {
+    backfillFromTables();
+    _valBarsCache.clear();
+    const res = await gradePending({ getBars: _valGetBars, universe: TASI_STOCKS.map(s => s.sym) });
+    console.log(`[validation] graded ${res.graded}, pending ${res.stillPending}`);
+  } catch (e) { console.warn('[validation] grade error:', e.message); }
 }
 
 function autoLogAccuracySignals(results) {
@@ -1214,6 +1237,7 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
       updateScoreHistory(state.scan.results);
       checkAlertRules(state.scan.results);
       autoLogAccuracySignals(state.scan.results);
+      runValidationGradeThrottled().catch(() => {}); // spine: sync + grade, once/day, non-blocking
 
       // Generate top opportunities analysis (async, non-blocking)
       if (!state.scan.quickScan) generateTopOpportunities(state.scan.results).catch(() => {});
@@ -2532,6 +2556,16 @@ const server = createServer(async (req, res) => {
       const categories = accuracyLab.winRateByCategory();
       const stats      = accuracyLab.getStats();
       return json(res, { categories, stats, ok: true });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Validation spine: honest edge metric — forward EXCESS vs equal-weight basket, net cost.
+  // Headline horizon is 20 sessions (where the backtested edge lives); 5/10 also returned.
+  if (path === '/api/lab/validation' && method === 'GET') {
+    try {
+      const horizons = {};
+      for (const h of VAL_HORIZONS) horizons[h] = getValidationStats({ horizon: h });
+      return json(res, { ok: true, headline_horizon: 20, horizons });
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 
