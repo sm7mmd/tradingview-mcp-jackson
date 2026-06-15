@@ -11159,8 +11159,79 @@ function renderLabPanel(d) {
   </table></div>` : '';
 
   // Win-rate breakdown by category (loaded async after main render)
-  el.innerHTML = statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
+  el.innerHTML = `<div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
+  loadLabValidation();
   loadLabWinRates();
+}
+
+// ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──
+async function loadLabValidation() {
+  const el = document.getElementById('lab-validation-section');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/lab/validation').then(r => r.json());
+    if (!d.ok) return;
+    const HH = d.headline_horizon || 20;
+    const pc = v => (v == null || isNaN(v)) ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+    const col = v => (v == null || isNaN(v)) ? 'var(--text3)' : v > 0 ? 'var(--green)' : '#ff5252';
+
+    // horizon cards (5/10/20) — overlap-corrected net is the honest number
+    const cards = [5, 10, 20].map(h => {
+      const s = d.horizons[h] || {};
+      const oc = s.overlap_corrected;
+      const graded = s.all?.n || 0;
+      const emph = h === HH;
+      if (!oc || !graded) {
+        return `<div class="lab-stat" style="${emph ? 'border-color:var(--accent)' : ''}">
+          <div class="lab-stat-val" style="font-size:18px;color:var(--text3)">—</div>
+          <div class="lab-stat-lbl">${h}-session${emph ? ' ★' : ''}</div>
+          <div style="font-size:9px;color:var(--text3);margin-top:3px">${s.pending ? s.pending + ' maturing' : 'no data'}</div>
+        </div>`;
+      }
+      const sig = Math.abs(oc.t_raw) >= 2;
+      return `<div class="lab-stat" style="${emph ? 'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)' : ''}">
+        <div class="lab-stat-val" style="font-size:20px;color:${col(oc.net_mean)}">${pc(oc.net_mean)}</div>
+        <div class="lab-stat-lbl">${h}-session net${emph ? ' ★' : ''}</div>
+        <div style="font-size:9px;margin-top:3px;color:${sig ? 'var(--text2)' : 'var(--text3)'}">t=${oc.t_raw} ${sig ? '✓' : '(weak)'} · n=${oc.n}</div>
+      </div>`;
+    }).join('');
+
+    // headline verdict
+    const H = d.horizons[HH] || {};
+    const oc = H.overlap_corrected;
+    let verdict;
+    if (!oc || !H.all?.n) {
+      verdict = `Headline (${HH}-session) edge not gradable yet — <strong>${H.pending || 0} signals maturing</strong>. Fills in as signals reach ${HH} trading sessions.`;
+    } else {
+      const sig = Math.abs(oc.t_raw) >= 2, pos = oc.net_mean > 0;
+      verdict = `Over <strong>${oc.n}</strong> near-independent signals, this engine beats an equal-weight TASI basket by <strong style="color:${col(oc.net_mean)}">${pc(oc.net_mean)} net of cost</strong> at a ${HH}-session hold` +
+        (sig ? (pos ? ' — statistically real (t≥2).' : ' — significantly negative (t≥2). The logic is anti-predictive at this horizon.')
+             : ' — but <strong>not statistically significant</strong> (t&lt;2); treat as no proven edge yet.');
+    }
+
+    // by signal type (headline horizon)
+    const bt = (H.by_type && Object.entries(H.by_type)) || [];
+    const typeRows = bt.sort((a, b) => b[1].net_mean - a[1].net_mean).map(([k, v]) => `<tr>
+      <td style="font-size:11px;font-weight:600;color:var(--text)">${k}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:${col(v.excess_mean)}">${pc(v.excess_mean)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;font-weight:700;color:${col(v.net_mean)}">${pc(v.net_mean)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${(v.beat_rate*100).toFixed(0)}%</td>
+      <td style="font-size:10px;color:var(--text3);text-align:end">${v.n}</td>
+    </tr>`).join('');
+
+    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-size:12px;font-weight:800;color:var(--text)">True Edge</span>
+        <span style="font-size:10px;color:var(--text3)">excess vs equal-weight TASI basket · net of cost · the honest metric</span>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px">The hit-rate below flatters signals in a rising market (the cap-weighted TASI index is Aramco-dominated, so most names "beat" it for free). This measures whether a signal beats a <em>random equal-weight basket</em> — the only fair test.</div>
+      <div class="lab-stats-grid" style="grid-template-columns:repeat(3,1fr)">${cards}</div>
+      <div class="lab-regime-strip" style="margin-top:10px;margin-bottom:${typeRows ? '10px' : '0'}">${verdict}</div>
+      ${typeRows ? `<div class="lab-table-wrap"><table class="lab-table">
+        <thead><tr><th>Signal Type (@${HH}-session)</th><th style="text-align:end">Excess</th><th style="text-align:end">Net</th><th style="text-align:end">Beat</th><th style="text-align:end">n</th></tr></thead>
+        <tbody>${typeRows}</tbody></table></div>` : ''}
+    </div>`;
+  } catch(_) {}
 }
 
 async function loadLabWinRates() {
