@@ -8,3 +8,7 @@ discovery-log.json
 dashboard/mawjah.db
 dashboard/mawjah.db-shm
 dashboard/mawjah.db-wal
+
+# Playwright auth session + verify artifacts (local only)
+.playwright-auth.json
+.playwright-auth/
