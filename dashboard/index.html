@@ -11140,9 +11140,14 @@ function renderLabPanel(d) {
   const s = d.stats || {};
   const fmt2 = v => v != null ? (+v).toFixed(2) : '—';
 
-  // Stats row
+  // Raw outcomes row — CONTEXT ONLY. Hit-rates flatter signals in a rising market; the
+  // True Edge card above (excess vs equal-weight basket, net cost) is the real scorecard.
   const statCol = v => v >= 70 ? 'var(--green)' : v >= 50 ? 'var(--yellow)' : '#ff5252';
-  const statsHtml = `<div class="lab-stats-grid">
+  const statsHtml = `<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px" title="Raw outcomes (context only)::These count how often a signal hit its target or stop — but in a rising market most things hit targets, so a high number here is NOT proof of skill. The honest scorecard is the True Edge card above, which measures whether the signal beats a fair equal-weight basket after costs. Read these as descriptive history, not as an edge.">
+      <span style="font-size:11px;font-weight:700;color:var(--text2)">Raw outcomes</span>
+      <span style="font-size:10px;color:var(--text3)">context only · flattered by a rising market · not proof of edge (see True Edge above)</span>
+    </div>
+    <div class="lab-stats-grid">
     <div class="lab-stat"><div class="lab-stat-val" style="color:var(--accent)">${s.total||0}</div><div class="lab-stat-lbl">Total Signals</div></div>
     <div class="lab-stat"><div class="lab-stat-val" style="color:${statCol(s.t1_rate||0)}">${s.t1_rate||0}%</div><div class="lab-stat-lbl">T1 Hit Rate</div></div>
     <div class="lab-stat"><div class="lab-stat-val" style="color:${statCol(s.t2_rate||0)}">${s.t2_rate||0}%</div><div class="lab-stat-lbl">T2 Hit Rate</div></div>
@@ -11153,7 +11158,7 @@ function renderLabPanel(d) {
   // Regime strip — what this means
   const regimeNote = s.total < 10
     ? `<div class="lab-regime-strip">Log at least 10 completed signals to unlock insights. The system automatically logs all STRONG BUY/SELL signals (score ≥7). <strong>Active signals: ${s.active||0}</strong></div>`
-    : `<div class="lab-regime-strip">Based on <strong>${s.total} completed signals</strong> — your system's expectancy is <strong style="color:${(s.avg_r||0)>=0?'var(--green)':'#ff5252'}">${fmt2(s.avg_r)}R per trade</strong>. ${(s.avg_r||0)>=0.5?'Positive expectancy — the system has an edge at current market conditions.':s.avg_r>=0?'Marginal edge — monitor closely and consider tightening entry criteria.':'Negative expectancy — review which setups are failing and reduce position size.'}</div>`;
+    : `<div class="lab-regime-strip">Based on <strong>${s.total} completed signals</strong>, raw expectancy is <strong style="color:${(s.avg_r||0)>=0?'var(--green)':'#ff5252'}">${fmt2(s.avg_r)}R per trade</strong> — but this just counts target-hits vs stop-outs, which a rising market inflates. <strong>Whether the signal has a real edge is the True Edge card above</strong> (excess vs an equal-weight basket, net of cost). Treat this R number as descriptive history, not proof of skill.</div>`;
 
   // Insights
   const insights = d.insights || [];
