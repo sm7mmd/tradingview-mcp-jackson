@@ -23,6 +23,7 @@ import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
+import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
@@ -2569,6 +2570,14 @@ const server = createServer(async (req, res) => {
       for (const h of VAL_HORIZONS) horizons[h] = getValidationStats({ horizon: h });
       return json(res, { ok: true, headline_horizon: 20, horizons });
     } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Momentum screen: the validated AVENUE 4 monthly buy-list (Sharia-compliant, liquid,
+  // ≥2y-listed, top-quintile 6-1 momentum). Returns current picks, not a backtest.
+  if (path === '/api/lab/momentum' && method === 'GET') {
+    try {
+      return json(res, await getMomentumScreen());
+    } catch(e) { return json(res, { success: false, error: e.message }, 500); }
   }
 
   // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
