@@ -266,14 +266,15 @@ tr.selected-row { background:var(--blue-dim) !important; }
 .score-fill { height:100%; border-radius:4px; transition:width .6s var(--ease-spring); }
 .score-text { font-size:11px; color:var(--text2); font-family:"JetBrains Mono",monospace; white-space:nowrap; }
 .bias-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; white-space:nowrap; letter-spacing:.02em; }
-.bias-strong-buy  { background:var(--green-dim);        color:var(--green);  }
-.bias-buy         { background:rgba(185,255,110,.1);    color:var(--lime);   }
-.bias-watch       { background:var(--yellow-dim);       color:var(--yellow); }
-.bias-skip        { background:rgba(255,255,255,.05);   color:var(--text3);  }
+/* Temperature scale — describes trend STATE, not buy/sell. Teal=uptrend, amber=downtrend, grey=flat. */
+.bias-strong-buy  { background:rgba(45,212,191,.16);     color:#2dd4bf;       }
+.bias-buy         { background:rgba(45,212,191,.09);     color:#5eead4;       }
+.bias-watch       { background:rgba(130,170,210,.10);    color:#9fc0e0;       }
+.bias-skip        { background:rgba(255,255,255,.05);    color:var(--text3);  }
 .bias-error       { background:var(--red-dim);                color:var(--red);    }
-.bias-strong-sell { background:rgba(255,23,68,.18);           color:#ff1744;       }
-.bias-sell        { background:rgba(255,87,34,.14);           color:#ff5252;       }
-.bias-avoid       { background:rgba(255,145,0,.14);           color:var(--orange); }
+.bias-strong-sell { background:rgba(255,145,0,.18);           color:#ffb300;       }
+.bias-sell        { background:rgba(255,170,40,.12);          color:#ffa726;       }
+.bias-avoid       { background:rgba(255,190,80,.10);          color:#ffcc80;       }
 .ema-stack { display:flex; gap:3px; align-items:center; }
 .ema-dot { width:8px; height:8px; border-radius:50%; }
 .ema-dot.aligned { background:var(--green); } .ema-dot.broken { background:var(--red); }
@@ -1729,22 +1730,23 @@ td { padding: 11px 14px; }
 tbody tr { border-bottom: 1px solid rgba(255,255,255,.03); }
 
 /* ── Signal-aware rows via CSS :has() ── */
-tbody tr:has(.bias-strong-buy) { border-inline-start: 2px solid rgba(0,230,118,.5); }
-tbody tr:has(.bias-strong-buy):hover { background: rgba(0,230,118,.055) !important; }
+/* row accents follow the trend-state temperature scale (teal=uptrend, amber=downtrend) */
+tbody tr:has(.bias-strong-buy) { border-inline-start: 2px solid rgba(45,212,191,.5); }
+tbody tr:has(.bias-strong-buy):hover { background: rgba(45,212,191,.05) !important; }
 
-tbody tr:has(.bias-buy) { border-inline-start: 2px solid rgba(185,255,110,.38); }
-tbody tr:has(.bias-buy):hover { background: rgba(185,255,110,.04) !important; }
+tbody tr:has(.bias-buy) { border-inline-start: 2px solid rgba(45,212,191,.32); }
+tbody tr:has(.bias-buy):hover { background: rgba(45,212,191,.035) !important; }
 
-tbody tr:has(.bias-watch) { border-inline-start: 2px solid rgba(255,215,64,.32); }
-tbody tr:has(.bias-watch):hover { background: rgba(255,215,64,.03) !important; }
+tbody tr:has(.bias-watch) { border-inline-start: 2px solid rgba(130,170,210,.30); }
+tbody tr:has(.bias-watch):hover { background: rgba(130,170,210,.03) !important; }
 
-tbody tr:has(.bias-strong-sell) { border-inline-start: 2px solid rgba(255,23,68,.5); }
-tbody tr:has(.bias-strong-sell):hover { background: rgba(255,23,68,.055) !important; }
+tbody tr:has(.bias-strong-sell) { border-inline-start: 2px solid rgba(255,145,0,.5); }
+tbody tr:has(.bias-strong-sell):hover { background: rgba(255,145,0,.05) !important; }
 
 tbody tr:has(.bias-sell),
-tbody tr:has(.bias-avoid) { border-inline-start: 2px solid rgba(255,145,0,.38); }
+tbody tr:has(.bias-avoid) { border-inline-start: 2px solid rgba(255,170,40,.36); }
 tbody tr:has(.bias-sell):hover,
-tbody tr:has(.bias-avoid):hover { background: rgba(255,145,0,.035) !important; }
+tbody tr:has(.bias-avoid):hover { background: rgba(255,170,40,.035) !important; }
 
 /* Fallback hover for skip/neutral rows */
 tbody tr:hover { background: rgba(255,255,255,.04) !important; }
@@ -3394,7 +3396,7 @@ td { padding: 10px 14px !important; }
             <th class="hm" onclick="sortTable('macd')" data-i18n="colMacd" style="text-align:end" title="MACD histogram — measures the difference between fast and slow momentum lines.&#10;&#10;Positive (green bar): Buying momentum is building&#10;Negative (red bar): Selling pressure dominates&#10;Crossing from negative to positive: strongest momentum shift signal&#10;&#10;We require MACD histogram to be positive for a buy signal.">MACD <span class="learn-chip" title="MACD (Moving Average Convergence Divergence) — tracks momentum shifts.&#10;&#10;Green number = bullish momentum building.&#10;Red number = bearish momentum.&#10;&#10;The most powerful signal is when MACD flips from red to green — that's when buying pressure takes over from selling pressure.">?</span></th>
             <th class="hm" onclick="sortTable('vol')"  data-i18n="colVol"  style="text-align:end" title="Volume multiplier — how much trading activity today vs. the 20-day average.&#10;&#10;1.0× = exactly average. 2.0× = twice as much trading as usual.&#10;&#10;We require at least 1.2× to confirm a move has real participation behind it. A breakout on low volume often fails.">Vol× <span class="learn-chip" title="Volume× — today's trading activity vs. the 20-day average.&#10;&#10;1.5× means 50% more shares changed hands than usual.&#10;&#10;Why it matters: price moves on high volume are more reliable. A stock that rises on 3× normal volume has conviction behind it. One that rises on 0.5× is drifting on thin air and often reverses.">?</span></th>
             <th class="hm" data-i18n="colEma" title="EMA trend stack indicator. ▲▲ means fully bullish (EMA 13 > 34 > 89 and price above 200-day). ▼▼ means fully bearish. Partial arrows mean some criteria are met. Click the ? for a detailed breakdown.">EMA&nbsp;<button class="col-info-btn" onclick="event.stopPropagation();showColPopover('ema',event)" title="EMA (Exponential Moving Average) trend stack.&#10;&#10;We check 4 conditions:&#10;1. EMA 13 is above EMA 34 (short-term trend is up)&#10;2. EMA 34 is above EMA 89 (medium-term trend is up)&#10;3. Price is above EMA 89 (stock is above its trend)&#10;4. Price is above EMA 200 (long-term bull market)&#10;&#10;▲▲ = all 4 passed · ▲ = 2–3 passed · ◆ = mixed · ▼ = mostly bearish · ▼▼ = all bearish">?</button></th>
-            <th onclick="sortTable('bias')" data-i18n="colSignal" title="Signal = the strategy's final verdict based on all criteria combined.&#10;&#10;STRONG BUY: 7+ criteria passed — highest conviction&#10;BUY: 5–6 criteria passed — solid entry&#10;WATCH: 3–4 criteria — not ready, keep watching&#10;SKIP: below 3 — no opportunity&#10;AVOID/SELL/STRONG SELL: bearish criteria dominating&#10;&#10;Click the badge to see which specific criteria passed or failed.">Signal <span class="learn-chip" title="Signal = our final recommendation based on the full score.&#10;&#10;STRONG BUY (🟢): 7+ of 9 checks passed — very high conviction&#10;BUY (🟩): 5–6 checks passed — solid setup&#10;WATCH (🟡): 3–4 checks — keep an eye on it&#10;SKIP (⚫): too weak to act on&#10;AVOID / SELL / STRONG SELL: bearish signals active&#10;&#10;Always click the badge for the full breakdown of what passed and what failed.">?</span></th>
+            <th onclick="sortTable('bias')" data-i18n="colSignal" title="Trend State = a DESCRIPTION of the stock's current price behaviour, not a buy/sell call.&#10;&#10;Strong Uptrend / Uptrend: trending up with momentum now&#10;Building: mixed, trend not established&#10;Flat: no clear trend&#10;Weak / Downtrend / Strong Downtrend: trending down&#10;&#10;IMPORTANT: this does NOT predict returns — in testing these labels lagged simple buy-and-hold. Use it to read the market, not as advice. The validated buy-list is the Momentum tab.&#10;Click the badge for the criteria breakdown.">Trend State <span class="learn-chip" title="Trend State — describes where the stock IS, not what to do.&#10;&#10;It summarises trend + momentum + volume into a current-state label. It is NOT a forecast: the score did not beat buy-and-hold in testing.&#10;Treat it as context for your own read; act on the Momentum screen + your chart analysis.">?</span></th>
             <th class="hm" data-i18n="colDiv" title="RSI divergence — when price makes a new high or low but RSI does not follow, momentum is secretly reversing. A warning signal before the price catches up to reality.">Div&nbsp;<button class="col-info-btn" onclick="event.stopPropagation();showColPopover('div',event)" title="RSI Divergence — a hidden warning signal.&#10;&#10;Bullish divergence: Price makes a lower low but RSI makes a higher low → hidden buying pressure, possible reversal up.&#10;Bearish divergence: Price makes a higher high but RSI makes a lower high → hidden selling pressure, possible reversal down.&#10;&#10;Divergences often precede reversals by 2–5 bars.">?</button></th>
             <th class="hm" data-i18n="colSharia" title="Sharia compliance status based on the company's business activities and debt ratios. Compliant = halal to trade. Review = uncertain. Non-compliant = not halal.">Halal&nbsp;<button class="col-info-btn" onclick="event.stopPropagation();showColPopover('halal',event)" title="Click to see the Sharia compliance methodology.">?</button></th>
             <th class="hm" onclick="sortTable('rs')" data-i18n="colRs" style="text-align:end" title="RS = Relative Strength vs. the market index over 20 trading days.&#10;&#10;+5% means this stock gained 5% MORE than its benchmark index over the same period.&#10;-3% means it lagged by 3%.&#10;&#10;Rule: In a rising market, only buy stocks with positive RS. Leaders tend to keep leading. Laggards tend to keep lagging.">RS <span class="learn-chip" title="RS (Relative Strength) — how this stock performs vs. its market index.&#10;&#10;+5% = outperformed the market by 5% over the past 20 days.&#10;-3% = underperformed by 3%.&#10;&#10;The most powerful setups combine a high Score AND positive RS — that means both the individual stock and its absolute strength are aligned.">?</span></th>
@@ -4112,7 +4114,7 @@ const TR = {
     fTech:'Tech', fFinancials:'Financials', fConsumer:'Consumer', fMetal:'Metals', fCrude:'Energy', fEtfEquity:'Equity ETF', fEtfMetal:'Metal ETF', fEtfCrude:'Oil ETF', fEtfBond:'Bond ETF',
     selectAllVis:'Select all visible',
     colTicker:'Ticker', colName:'Name', colSector:'Sector', colPrice:'Price',
-    colScore:'Score ↓', colRsi:'RSI', colMacd:'MACD', colVol:'Vol×', colEma:'EMA', colSignal:'Signal', colSharia:'Halal', colRs:'RS', colWeekly:'W',
+    colScore:'Score ↓', colRsi:'RSI', colMacd:'MACD', colVol:'Vol×', colEma:'EMA', colSignal:'Trend State', colSharia:'Halal', colRs:'RS', colWeekly:'W',
     emptyScreener:'No scan data yet.<br>Click <strong>Scan All</strong> to start.',
     scoringTitle:'How stocks are scored (out of 8)',
     scoringSubtitle:'Applied automatically during every scan',
@@ -4127,8 +4129,8 @@ const TR = {
     sEnergyUs:'Energy', sEtfEquity:'Equity ETF', sEtfMetal:'Metal ETF', sEtfCrude:'Oil ETF', sEtfBond:'Bond ETF',
     sCrypto:'Crypto', sMetal:'Metals', sCrude:'Oil & Gas',
     // Bias
-    bStrongBuy:'STRONG BUY', bBuy:'BUY', bWatch:'WATCH', bSkip:'SKIP', bError:'ERROR', bNoData:'NO DATA',
-    bStrongSell:'STRONG SELL', bSell:'SELL', bAvoid:'AVOID',
+    bStrongBuy:'Strong Uptrend', bBuy:'Uptrend', bWatch:'Building', bSkip:'Flat', bError:'ERROR', bNoData:'NO DATA',
+    bStrongSell:'Strong Downtrend', bSell:'Downtrend', bAvoid:'Weak',
     // Drawer
     critBreakdown:'Criteria breakdown',
     pass:'PASS', fail:'FAIL',
@@ -4268,7 +4270,7 @@ const TR = {
     fTech:'تقنية', fFinancials:'مالية', fConsumer:'استهلاكي', fMetal:'معادن', fCrude:'طاقة', fEtfEquity:'صناديق أسهم', fEtfMetal:'صناديق معادن', fEtfCrude:'صناديق نفط', fEtfBond:'صناديق سندات',
     selectAllVis:'تحديد الكل الظاهر',
     colTicker:'الرمز', colName:'الاسم', colSector:'القطاع', colPrice:'السعر',
-    colScore:'التقييم ↓', colRsi:'القوة النسبية', colMacd:'الزخم', colVol:'الحجم×', colEma:'المتوسطات', colSignal:'الإشارة', colSharia:'حلال', colRs:'ق.ن.',
+    colScore:'التقييم ↓', colRsi:'القوة النسبية', colMacd:'الزخم', colVol:'الحجم×', colEma:'المتوسطات', colSignal:'حالة الاتجاه', colSharia:'حلال', colRs:'ق.ن.',
     emptyScreener:'لا توجد بيانات مسح بعد.<br>اضغط <strong>مسح الكل</strong> للبدء.',
     scoringTitle:'كيف يُقيَّم السهم (من 8 نقاط)',
     scoringSubtitle:'تُطبَّق هذه القواعد الخمس تلقائياً في كل عملية مسح',
@@ -4281,8 +4283,8 @@ const TR = {
     sTech:'تقنية', sFinancials:'مالية', sConsumer:'استهلاكي', sRetailUs:'تجزئة', sHealthUs:'صحة',
     sEnergyUs:'طاقة', sEtfEquity:'صناديق أسهم', sEtfMetal:'صناديق معادن', sEtfCrude:'صناديق نفط', sEtfBond:'صناديق سندات',
     sCrypto:'مشفرة', sMetal:'معادن', sCrude:'نفط وغاز',
-    bStrongBuy:'شراء قوي', bBuy:'شراء', bWatch:'مراقبة', bSkip:'تجاهل', bError:'خطأ', bNoData:'لا بيانات',
-    bStrongSell:'بيع قوي', bSell:'بيع', bAvoid:'تجنب',
+    bStrongBuy:'اتجاه صاعد قوي', bBuy:'اتجاه صاعد', bWatch:'يتشكل', bSkip:'محايد', bError:'خطأ', bNoData:'لا بيانات',
+    bStrongSell:'اتجاه هابط قوي', bSell:'اتجاه هابط', bAvoid:'ضعيف',
     critBreakdown:'تفاصيل المعايير',
     pass:'ناجح', fail:'فاشل',
     entryGuidanceTitle:'📍 توجيه الدخول',
@@ -4459,22 +4461,22 @@ const EXPL = {
   },
   verdicts: {
     en: {
-      'STRONG BUY':  n => `<strong>${n}</strong> scores 7–8 out of 8 points — the highest conviction level in this system. The trend structure is solid: moving averages stacked correctly, price above its long-term baseline, RSI and MACD confirming momentum. A score of 7/8 still qualifies as STRONG BUY — a single missing criterion doesn't invalidate the setup if the core structure is aligned.`,
-      'BUY':         n => `<strong>${n}</strong> has a good setup but is missing one or two confirmations. The core trend structure looks healthy. Consider a smaller initial position and add size when the missing criteria are met.`,
-      'WATCH':       n => `<strong>${n}</strong> is showing early bullish signs but the setup isn't complete yet. Add to your watchlist and revisit when the remaining criteria are satisfied.`,
-      'SKIP':        n => `<strong>${n}</strong> does not meet the strategy's entry requirements right now. The trend structure is unclear. No trade — wait for conditions to improve.`,
-      'STRONG SELL': n => `<strong>${n}</strong> triggers all bearish signals. EMAs are inverted, price is below the long-term baseline, RSI is in the weak zone, and MACD confirms downward momentum. This is a high-conviction bearish setup — avoid new long positions and consider exiting existing ones.`,
-      'SELL':        n => `<strong>${n}</strong> shows a strong bearish setup with most criteria confirmed. The trend is clearly pointing down. No new longs — exit or reduce existing positions.`,
-      'AVOID':       n => `<strong>${n}</strong> is showing early bearish signs. The setup is deteriorating but not fully confirmed. Monitor closely and avoid adding to long positions until conditions improve.`,
+      'STRONG BUY':  n => `<strong>${n}</strong> is in a <strong>strong uptrend</strong> right now: moving averages stacked up, price above its long-term baseline, RSI and MACD showing momentum. This describes the stock's <em>current state</em> — it is <strong>not a forecast</strong>. In testing, names in this state were profitable only ~37% of the time and lagged simple buy-and-hold. Use it as market context; the validated buy-list is the Momentum tab, and your own chart read matters.`,
+      'BUY':         n => `<strong>${n}</strong> is in an <strong>uptrend</strong> but missing one or two confirmations. A description of current state, not advice — the score does not predict returns. Context for your own read.`,
+      'WATCH':       n => `<strong>${n}</strong> shows <strong>early/mixed</strong> signals — no established trend yet. Descriptive only; nothing to act on from the score alone.`,
+      'SKIP':        n => `<strong>${n}</strong> has <strong>no clear trend</strong> either way right now. Neutral state.`,
+      'STRONG SELL': n => `<strong>${n}</strong> is in a <strong>strong downtrend</strong>: EMAs inverted, price below its baseline, weak RSI, MACD down. This describes current state — <strong>not a trade signal</strong> (you can't short TASI). Context only.`,
+      'SELL':        n => `<strong>${n}</strong> is in a <strong>downtrend</strong>. Descriptive state, not a short call (no shorting on TASI). Context only.`,
+      'AVOID':       n => `<strong>${n}</strong> is showing <strong>weakness</strong> — early downward signs, not a confirmed trend. Descriptive state, not advice.`,
     },
     ar: {
-      'STRONG BUY':  n => `<strong>${n}</strong> يجتاز جميع المعايير الرئيسية للاستراتيجية. البنية الاتجاهية متينة. إعداد صعودي عالي الثقة.`,
-      'BUY':         n => `<strong>${n}</strong> يستوفي معظم المعايير لكنه يفتقر لتأكيد أو اثنين. البنية سليمة. يُنصح بحصة أولية أصغر.`,
-      'WATCH':       n => `<strong>${n}</strong> يُظهر علامات صعودية مبكرة لكن الإعداد لم يكتمل بعد. أضفه لقائمة المراقبة.`,
-      'SKIP':        n => `<strong>${n}</strong> لا يستوفي متطلبات الدخول حالياً. لا تداول.`,
-      'STRONG SELL': n => `<strong>${n}</strong> يُشغّل جميع الإشارات الهبوطية. المتوسطات مقلوبة، السعر تحت خط الأساس، وRSI وMACD يؤكدان الهبوط. إعداد هبوطي عالي الثقة — تجنب الشراء وفكّر بتخفيض المراكز الحالية.`,
-      'SELL':        n => `<strong>${n}</strong> يُظهر إعداداً هبوطياً قوياً. الاتجاه هابط بوضوح. لا شراء — خروج أو تخفيض المراكز.`,
-      'AVOID':       n => `<strong>${n}</strong> يُظهر علامات هبوطية مبكرة. راقبه وتجنب إضافة مراكز شراء.`,
+      'STRONG BUY':  n => `<strong>${n}</strong> في <strong>اتجاه صاعد قوي</strong> حالياً: المتوسطات مرتبة صعوداً، السعر فوق خط الأساس، وRSI وMACD يظهران زخماً. هذا <em>وصف للحالة الراهنة</em> وليس توقعاً. في الاختبارات، الأسهم في هذه الحالة كانت رابحة بنسبة ~37% فقط وتخلّفت عن الشراء والاحتفاظ البسيط. استخدمه كسياق للسوق؛ قائمة الشراء المُتحقَّقة هي تبويب الزخم.`,
+      'BUY':         n => `<strong>${n}</strong> في <strong>اتجاه صاعد</strong> مع نقص تأكيد أو اثنين. وصف للحالة وليس نصيحة — التقييم لا يتنبأ بالعوائد. سياق لقراءتك الخاصة.`,
+      'WATCH':       n => `<strong>${n}</strong> إشارات <strong>مبكرة/مختلطة</strong> دون اتجاه واضح. وصف فقط.`,
+      'SKIP':        n => `<strong>${n}</strong> <strong>لا يوجد اتجاه واضح</strong> حالياً. حالة محايدة.`,
+      'STRONG SELL': n => `<strong>${n}</strong> في <strong>اتجاه هابط قوي</strong>: المتوسطات مقلوبة، السعر تحت الأساس، RSI ضعيف، MACD هابط. وصف للحالة — <strong>وليس إشارة تداول</strong> (لا بيع على المكشوف في تداول). سياق فقط.`,
+      'SELL':        n => `<strong>${n}</strong> في <strong>اتجاه هابط</strong>. وصف للحالة وليس إشارة بيع على المكشوف (غير ممكن في تداول). سياق فقط.`,
+      'AVOID':       n => `<strong>${n}</strong> يُظهر <strong>ضعفاً</strong> — علامات هبوطية مبكرة غير مؤكدة. وصف للحالة وليس نصيحة.`,
     }
   },
   entryGuide: {
@@ -6007,7 +6009,18 @@ function biasBadgeHtml(bias){
     'SKIP':t('bSkip'),'ERROR':t('bError'),'NO_DATA':t('bNoData'),
     'STRONG SELL':t('bStrongSell'),'SELL':t('bSell'),'AVOID':t('bAvoid'),
   }[bias]||bias;
-  return`<span class="bias-badge ${cls}">${icon} ${label}</span>`;
+  // Honest tooltip: this DESCRIBES current price state, it does NOT forecast or recommend.
+  const tip={
+    'STRONG BUY':'Strong Uptrend::Describes the current price state — trending up with momentum. NOT a forecast or buy advice. History: these scored-high names were profitable only ~37% of the time and LAGGED simple buy-and-hold. Use as context; the validated buy-list is the Momentum tab.',
+    'BUY':'Uptrend::Price is in an uptrend. A description of current state, not a recommendation — the score does not predict returns (it lagged buy-and-hold in testing).',
+    'WATCH':'Building::Mixed/early signals — trend not established. Descriptive only.',
+    'SKIP':'Flat::No clear trend either way.',
+    'AVOID':'Weak::Price showing weakness. Descriptive state, not a sell call.',
+    'SELL':'Downtrend::Price is in a downtrend. NOT a short signal (no shorting on TASI) — context only.',
+    'STRONG SELL':'Strong Downtrend::Price falling hard. Descriptive state, not a trade signal. You cannot short TASI, so this is context only.',
+  }[bias];
+  const titleAttr = tip ? ` title="${tip.replace(/"/g,'')}" style="cursor:help"` : '';
+  return`<span class="bias-badge ${cls}"${titleAttr}>${icon} ${label}</span>`;
 }
 function emaStackHtml(r){ if(!r.emas)return'—'; const{ema13,ema34,ema89,ema200}=r.emas; return`<div class="ema-stack"><div class="ema-dot ${ema13>ema34&&ema34>ema89?'aligned':'broken'}"></div><div class="ema-dot ${r.price>ema200?'aligned':'broken'}"></div></div>`; }
 
@@ -10751,6 +10764,90 @@ function closeChecklist(){ document.getElementById('cl-overlay')?.classList.remo
 
   document.addEventListener('mouseleave', hide);
   document.addEventListener('scroll', hide, true);
+})();
+
+// ── Platform-wide plain-English glossary: auto-attaches hover tooltips to jargon ──
+// One place to maintain. An auto-binder scans table headers + metric labels (and known
+// signal words), matches their text to the glossary, and sets a Header::body title that
+// the tooltip engine above renders. A MutationObserver covers dynamically-rendered tables.
+(function(){
+  // key = normalized on-screen text → "Header::plain-English explanation"
+  const G = {
+    'ticker': 'Ticker::The stock\'s short code on the exchange (e.g. 1120).',
+    'symbol': 'Symbol::The stock\'s exchange code.',
+    'price': 'Price::Most recent traded price, in Saudi Riyals.',
+    'scan price': 'Scan Price::The price at the moment this scan was run.',
+    'score': 'Score::A 0–9 strength rating. Higher means more buy signals are lining up at once.',
+    'pts': 'Pts::Points this single criterion added to the total score.',
+    'bias': 'Bias::The engine\'s overall call for the stock — e.g. STRONG BUY, BUY, NEUTRAL, SELL.',
+    'signal': 'Signal::The engine\'s call, from combining all the indicators together.',
+    'signal type': 'Signal Type::Which kind of trigger fired — e.g. breakout, oversold bounce, dividend.',
+    'signals': 'Signals::How many separate triggers are active for this stock.',
+    'rsi': 'RSI (Relative Strength Index)::A 0–100 momentum gauge. Above 70 = stretched up (overbought), below 30 = stretched down (oversold).',
+    'macd': 'MACD::A trend-and-momentum indicator. Turning up hints buyers are taking control.',
+    'atr': 'ATR (Average True Range)::How much the stock typically moves in a day, in riyals. Used to set stop distance — bigger ATR means a wider stop.',
+    'ema': 'EMA (Exponential Moving Average)::A smoothed average price. The 200-EMA is the common dividing line between long-term up- and down-trends.',
+    'adx': 'ADX::How strong the trend is (not its direction). Above ~25 means a real trend rather than choppy drift.',
+    'vwap': 'VWAP::The volume-weighted average price — a fair-value reference line for the day.',
+    'obv': 'OBV (On-Balance Volume)::Tallies volume on up-days vs down-days to show whether money is flowing in or out.',
+    'rs': 'RS (Relative Strength)::How the stock is doing versus the market. Positive = beating the market.',
+    'beta': 'Beta::How much the stock swings compared with the market. Above 1 = swings more than the market.',
+    'r-multiple': 'R-Multiple::Profit measured in units of risk. +2R means you made twice what you risked.',
+    'r multiple': 'R-Multiple::Profit measured in units of risk. +2R means you made twice what you risked.',
+    'win%': 'Win Rate::The share of trades that ended in profit.',
+    'win rate': 'Win Rate::The share of trades that ended in profit.',
+    'pf': 'PF (Profit Factor)::Total winnings ÷ total losses. Above 1 is profitable; above 1.5 is solid.',
+    'expectancy': 'Expectancy::Average profit per trade in risk units. Positive means a real edge over many trades.',
+    'net': 'Net::Return after trading costs (fees) are subtracted.',
+    'excess': 'Excess::How much more than a fair equal-weight benchmark — the honest measure of skill, not just riding the market.',
+    'return': 'Return::Percentage gain or loss over the period.',
+    'p(profit)': 'P(profit)::The chance a pick simply makes money.',
+    'p(beat)': 'P(beat)::The chance a pick beats just buying and holding — the honest yardstick.',
+    '±ci': '±CI (Confidence Interval)::The uncertainty band around a number. Wider = less certain (usually a small sample).',
+    'ci': 'CI (Confidence Interval)::The uncertainty band around a number. Wider = less certain.',
+    'n': 'n::How many samples are behind this number. A small n means treat it with caution.',
+    't1': 'T1::First take-profit target price.',
+    't2': 'T2::Second take-profit target price.',
+    'stop': 'Stop::The exit price that caps your loss if the trade goes wrong.',
+    'entry': 'Entry::The price you bought at (or plan to).',
+    'drawdown': 'Drawdown::The drop from a peak to a later low — the pain you sit through before recovery.',
+    'sharpe': 'Sharpe::Return earned per unit of risk. Higher = a smoother ride for the same gain.',
+    'p&l': 'P&L::Profit and Loss — money made or lost.',
+    'p&l vs entry': 'P&L vs Entry::Profit or loss measured from your entry price.',
+    'sector': 'Sector::The industry group — banks, materials, energy, etc.',
+    'style': 'Style::The trade type / timeframe (e.g. swing, scalp, position).',
+    'rating': 'Rating::A quality grade — strong, moderate, or weak.',
+    'outcome': 'Outcome::How the trade resolved — hit target, stopped out, or still open.',
+    'r:r': 'R:R (Risk-to-Reward)::How much you stand to gain versus lose. 1:3 means risking 1 to make 3.',
+    'div yield': 'Dividend Yield::Yearly dividend as a % of the share price.',
+    'p/e': 'P/E (Price-to-Earnings)::Price divided by yearly profit per share. A rough gauge of how expensive a stock is.',
+    'mkt cap': 'Market Cap::Total value of the company (share price × number of shares).',
+    'liquidity': 'Liquidity::How easily you can buy/sell without moving the price. Higher = easier to trade.',
+  };
+  // exact-text signal words (matched only on small tag/badge elements to stay safe)
+  const SIG = {
+    'strong buy': 'STRONG BUY::Highest-conviction buy — the most signals agree. Still just one input, not a guarantee.',
+    'buy': 'BUY::A positive signal, weaker than STRONG BUY.',
+    'neutral': 'NEUTRAL::No clear edge either way — the engine has no strong opinion.',
+    'hold': 'HOLD::Stay put — no action suggested right now.',
+    'sell': 'SELL::A negative signal — the engine sees weakness.',
+    'strong sell': 'STRONG SELL::Highest-conviction negative signal.',
+  };
+  const norm = s => (s||'').replace(/ | /g,' ').trim().toLowerCase().replace(/\s+/g,' ').replace(/[:•★\s]+$/,'').trim();
+  const LABEL_SEL = 'th,.bt-stat-lbl,.lab-stat-lbl,.regime-metric-lbl,.sizer-lbl,.atr-label,.crit-label,.sublabel,.goal-field-label,.exec-lvl-label,.stat-lbl,.crit-label,.label';
+  const SIG_SEL = '.tag,.badge,[class*="bias"],[class*="-pill"],[class*="signal-"]';
+  function tag(el, text){ if(!el||el.hasAttribute('title')||el._tipActive||el._g) return; el.setAttribute('title', text); el.style.cursor='help'; el._g=1; }
+  function apply(root){
+    const r = root && root.querySelectorAll ? root : document;
+    try {
+      r.querySelectorAll(LABEL_SEL).forEach(el => { const v = G[norm(el.textContent)]; if(v) tag(el, v); });
+      r.querySelectorAll(SIG_SEL).forEach(el => { const v = SIG[norm(el.textContent)]; if(v) tag(el, v); });
+    } catch(_){}
+  }
+  let pend = null;
+  function schedule(){ if(pend) return; pend = setTimeout(()=>{ pend=null; apply(document); }, 300); }
+  function start(){ apply(document); new MutationObserver(schedule).observe(document.body, { childList:true, subtree:true }); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
 
 // ════════════════════════════════════════════════════════════
