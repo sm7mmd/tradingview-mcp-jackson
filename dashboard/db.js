@@ -167,6 +167,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_acc_sym  ON accuracy_signals(sym, outcome);
   CREATE INDEX IF NOT EXISTS idx_acc_date ON accuracy_signals(logged_at DESC);
 
+  -- Validation spine: every signal graded by forward EXCESS return vs an
+  -- equal-weight TASI basket over a fixed horizon, net of cost. This is the
+  -- honest edge metric (the accuracy_signals stop/target hit-rate flatters
+  -- signals in a rising tape — see scripts/backtest_logic.mjs).
+  CREATE TABLE IF NOT EXISTS signal_outcomes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym          TEXT NOT NULL,
+    source       TEXT NOT NULL,        -- 'scoreBias' | 'opportunity'
+    signal_type  TEXT NOT NULL,        -- 'STRONG_BUY' | opportunity signal_type
+    score        REAL,
+    conviction   REAL,
+    entry_date   TEXT NOT NULL,        -- YYYY-MM-DD bar date the signal is based on
+    entry_price  REAL NOT NULL,
+    horizon      INTEGER NOT NULL,     -- forward sessions (5/10/20)
+    regime       TEXT,                 -- 'up'|'down' at entry (index vs its SMA50)
+    graded_at    TEXT,                 -- ISO; NULL = pending
+    fwd_price    REAL,
+    signal_ret   REAL,
+    basket_ret   REAL,                 -- equal-weight TASI basket, same window
+    excess       REAL,                 -- signal_ret - basket_ret
+    excess_net   REAL,                 -- excess - round-trip cost
+    UNIQUE(sym, source, signal_type, entry_date, horizon)
+  );
+  CREATE INDEX IF NOT EXISTS idx_so_pending ON signal_outcomes(graded_at, entry_date);
+  CREATE INDEX IF NOT EXISTS idx_so_type    ON signal_outcomes(signal_type, horizon);
+
   CREATE TABLE IF NOT EXISTS cma_filings (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     sym           TEXT NOT NULL,          -- TADAWUL:XXXX
@@ -848,31 +874,29 @@ export const accuracyLab = {
     return stale.length;
   },
 
+  // Direction is derived from the entry/stop geometry, NOT the (possibly re-labeled)
+  // bias string — a long has stop < entry, a short has stop > entry. R is signed so
+  // a stop is always negative and a target always positive, for both directions.
   checkPriceOutcomes(scanResults) {
     const active = db.prepare("SELECT * FROM accuracy_signals WHERE outcome IS NULL").all();
     for (const sig of active) {
       const r = scanResults.find(x => x.sym === sig.sym);
       if (!r?.price) continue;
       const price = r.price;
-      const isBear = ['STRONG SELL','SELL','AVOID'].includes(sig.bias);
-      const atStop = isBear ? price >= sig.price_stop : price <= sig.price_stop;
-      const atT1   = isBear ? price <= sig.price_t1  : price >= sig.price_t1;
-      const atT2   = isBear ? price <= sig.price_t2  : price >= sig.price_t2;
+      if (!sig.price_entry || !sig.price_stop) continue;
+      const isLong = sig.price_stop < sig.price_entry;
+      const dir    = isLong ? 1 : -1;
+      const risk   = Math.abs(sig.price_entry - sig.price_stop);
+      const rAt    = (p) => risk ? +((dir * (p - sig.price_entry)) / risk).toFixed(2) : (dir * (p - sig.price_entry) >= 0 ? 1 : -1);
+      const atStop = isLong ? price <= sig.price_stop : price >= sig.price_stop;
+      const atT2   = isLong ? price >= sig.price_t2  : price <= sig.price_t2;
+      const atT1   = isLong ? price >= sig.price_t1  : price <= sig.price_t1;
       if (sig.price_stop && atStop) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((sig.price_stop - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : -1;
-        this.updateOutcome(sig.id, { outcome: 'stop', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 'stop', price_outcome: price, r_multiple: rAt(price) });
       } else if (sig.price_t2 && atT2) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : 2;
-        this.updateOutcome(sig.id, { outcome: 't2', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 't2', price_outcome: price, r_multiple: rAt(price) });
       } else if (sig.price_t1 && atT1) {
-        const rMult = sig.price_stop && sig.price_entry
-          ? +((price - sig.price_entry) / Math.abs(sig.price_entry - sig.price_stop)).toFixed(2)
-          : 1;
-        this.updateOutcome(sig.id, { outcome: 't1', price_outcome: price, r_multiple: rMult });
+        this.updateOutcome(sig.id, { outcome: 't1', price_outcome: price, r_multiple: rAt(price) });
       }
     }
   },

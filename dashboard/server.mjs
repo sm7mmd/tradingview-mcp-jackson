@@ -3,8 +3,8 @@
  * Usage: node dashboard/server.mjs
  */
 
-// Load .env from repo root (graceful: no error if missing or dotenv not installed)
-try { const { createRequire } = await import('node:module'); createRequire(import.meta.url)('dotenv').config({ path: new URL('../.env', import.meta.url).pathname }); } catch (_) {}
+// .env is loaded via `node -r dotenv/config` in the npm script (preloads before
+// ESM eval, so env vars are present when imported modules initialize).
 
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -21,6 +21,11 @@ import { getShariaStatus, getAllStatuses } from "./sharia.mjs";
 import * as chartCore from "../src/core/chart.js";
 import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
+import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
+import { getCalibration, calibrateSignal } from "./calibration.mjs";
+import { getMomentumScreen } from "./momentum_screen.mjs";
+import { getBlockDealSignal } from "./blockdeal_signal.mjs";
+import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -578,6 +583,28 @@ function updateScoreHistory(results) {
     state.score_history[idxSym].push(idxEntry);
     state.score_history[idxSym] = state.score_history[idxSym].slice(-15);
   }
+}
+
+// ── Validation spine: sync signals + grade matured outcomes vs equal-weight basket ──
+let _valLastRun = null;
+const _valBarsCache = new Map();
+async function _valGetBars(sym) {
+  if (_valBarsCache.has(sym)) return _valBarsCache.get(sym);
+  let b = [];
+  try { b = (await fetchYahooOHLCV(toYahooSym(sym), '1d', 520)).map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), close: x.close })); } catch {}
+  _valBarsCache.set(sym, b); return b;
+}
+// Run at most once per calendar day (grading only changes as new daily bars print).
+async function runValidationGradeThrottled() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (_valLastRun === today) return;
+  _valLastRun = today;
+  try {
+    backfillFromTables();
+    _valBarsCache.clear();
+    const res = await gradePending({ getBars: _valGetBars, universe: TASI_STOCKS.map(s => s.sym) });
+    console.log(`[validation] graded ${res.graded}, pending ${res.stillPending}`);
+  } catch (e) { console.warn('[validation] grade error:', e.message); }
 }
 
 function autoLogAccuracySignals(results) {
@@ -1214,6 +1241,7 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
       updateScoreHistory(state.scan.results);
       checkAlertRules(state.scan.results);
       autoLogAccuracySignals(state.scan.results);
+      runValidationGradeThrottled().catch(() => {}); // spine: sync + grade, once/day, non-blocking
 
       // Generate top opportunities analysis (async, non-blocking)
       if (!state.scan.quickScan) generateTopOpportunities(state.scan.results).catch(() => {});
@@ -1525,20 +1553,7 @@ const server = createServer(async (req, res) => {
       ...startScan(quickList, market, state.scan.mode || 'swing', true) });
   }
 
-  if (path === "/api/whale/activity" && method === "GET") {
-    const results = (state.scan.results || [])
-      .filter(r => r.whale_score != null && r.whale_score > 0)
-      .sort((a, b) => (b.whale_score || 0) - (a.whale_score || 0))
-      .map(r => {
-        // Count consecutive recent scans with elevated whale activity
-        const hist = (state.score_history[r.sym] || []).slice(-10);
-        // Use bias as proxy: count consecutive recent BUY/STRONG BUY/WATCH scans from latest
-        const bullishStreak = [...hist].reverse().findIndex(h => !['STRONG BUY','BUY','WATCH'].includes(h.b));
-        const streak = bullishStreak === -1 ? hist.length : bullishStreak;
-        return { ...r, streak };
-      });
-    return json(res, { results, lastRun: state.scan.lastRun });
-  }
+  // /api/whale/activity removed Phase 4 — whale_score has no edge (tested -8.9%/yr, t=-1.47)
 
   if (path === "/api/whale/block-deals" && method === "GET") {
     blockDealsCache.ts = 0; // force refresh to include latest manual deals
@@ -2220,37 +2235,8 @@ const server = createServer(async (req, res) => {
     return json(res, { events: getUpcomingEvents(days) });
   }
 
-  if (path === "/api/opportunities" && method === "GET") {
-    const minConv = parseInt(url.searchParams.get('min') || '30');
-    const limit   = parseInt(url.searchParams.get('limit') || '20');
-    dbOppSignals.expireOld();
-    const rows = dbOppSignals.getActive(minConv, limit);
-    const opportunities = rows.map(r => ({
-      id: r.id, sym: r.sym, name: r.payload.name || r.name,
-      signal_type: r.signal_type, conviction: r.conviction,
-      confluence: r.payload.confluence || 1,
-      headline: r.payload.headline, note: r.payload.note,
-      price: r.payload.price, score: r.payload.score, maxScore: r.payload.maxScore,
-      bias: r.payload.bias, regime: r.payload.regime,
-      stop: r.payload.stop, target1: r.payload.target1, target2: r.payload.target2,
-      rsi: r.payload.rsi, vol_ratio: r.payload.vol_ratio,
-      whale_score: r.payload.whale_score, mfi: r.payload.mfi,
-      blockDeals: r.payload.blockDeals, cmaBuys: r.payload.cmaBuys,
-      insiders: r.payload.insiders, blockDealDates: r.payload.blockDealDates,
-      cmaSummary: r.payload.cmaSummary, insiderSummary: r.payload.insiderSummary,
-      trajectory: r.payload.trajectory, eta: r.payload.eta, scansLeft: r.payload.scansLeft,
-      detected_at: r.detected_at, refreshed_at: r.refreshed_at,
-      expires_at: r.expires_at,
-      discovery_price: r.discovery_price,
-    }));
-    return json(res, { opportunities, scanTs: state.scan.lastRun, generatedAt: state.scan.lastRun, signalDefs: SIGNAL_DEFS });
-  }
-
-  if (path === "/api/opportunities/refresh" && method === "POST") {
-    if (!state.scan.results?.length) return json(res, { error: 'No scan results — run a scan first' }, 400);
-    detectAndStoreSignals(state.scan.results).catch(() => {});
-    return json(res, { ok: true, message: 'Signal detection running — refresh /api/opportunities in 2s' });
-  }
+  // /api/opportunities (+ /refresh) removed Phase 4 — score-derived ranking; 9-pt score has no edge (t=0.74).
+  // detectAndStoreSignals kept (scan-pipeline detector); dbOppSignals/SIGNAL_DEFS kept (used elsewhere).
 
   // ── Strategy Validation ──────────────────────────────────────────────────────
   if (path === '/api/strategy-validation' && method === 'GET') {
@@ -2535,6 +2521,59 @@ const server = createServer(async (req, res) => {
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 
+  // Validation spine: honest edge metric — forward EXCESS vs equal-weight basket, net cost.
+  // Headline horizon is 20 sessions (where the backtested edge lives); 5/10 also returned.
+  if (path === '/api/lab/validation' && method === 'GET') {
+    try {
+      const horizons = {};
+      for (const h of VAL_HORIZONS) horizons[h] = getValidationStats({ horizon: h });
+      return json(res, { ok: true, headline_horizon: 20, horizons });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Momentum screen: the validated AVENUE 4 monthly buy-list (Sharia-compliant, liquid,
+  // ≥2y-listed, top-quintile 6-1 momentum). Returns current picks, not a backtest.
+  if (path === '/api/lab/momentum' && method === 'GET') {
+    try {
+      return json(res, await getMomentumScreen());
+    } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Block-deal signal: validated "follow big premium trades, ~1mo hold" watch-list.
+  if (path === '/api/lab/blockdeals' && method === 'GET') {
+    try {
+      return json(res, await getBlockDealSignal());
+    } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
+  // Wilson confidence intervals. ?horizon=N (default 20). ?type=&score= for a single lookup.
+  if (path === '/api/lab/calibration' && method === 'GET') {
+    try {
+      const horizon = +url.searchParams.get('horizon') || 20;
+      const type = url.searchParams.get('type');
+      if (type) {
+        const score = url.searchParams.get('score') != null ? +url.searchParams.get('score') : null;
+        const regime = url.searchParams.get('regime') || null;
+        return json(res, { ok: true, signal: calibrateSignal({ signal_type: type, score, regime, horizon }) });
+      }
+      return json(res, { ok: true, ...getCalibration({ horizon }) });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Catalyst risk flags — "don't buy right now" defensive warnings from validated
+  // negative catalysts (debt issuance / earnings / management change). Not alpha.
+  if (path === '/api/catalyst/risks' && method === 'GET') {
+    try { return json(res, { ok: true, flags: getActiveRiskFlags() }); }
+    catch(e) { return json(res, { error: e.message }, 500); }
+  }
+  if (path.startsWith('/api/catalyst/risk/') && method === 'GET') {
+    try {
+      const sym = decodeURIComponent(path.slice('/api/catalyst/risk/'.length));
+      return json(res, { ok: true, sym, flags: getRiskFlags(sym) });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
   // ── Kelly position sizer ──────────────────────────────────────────────────
   if (path.startsWith('/api/kelly/') && method === 'GET') {
     const sym = decodeURIComponent(path.slice('/api/kelly/'.length));
@@ -2579,41 +2618,7 @@ const server = createServer(async (req, res) => {
   }
 
   // Insider buys
-  if (path === '/api/insider-buys' && method === 'GET') {
-    return json(res, { buys: loadInsiderBuys() });
-  }
-  if (path === '/api/insider-buys/refresh' && method === 'POST') {
-    insiderRefreshTs = 0; // bypass TTL for manual refresh
-    const result = await fetchAndStoreInsiderBuys();
-    return json(res, { ...result, buys: loadInsiderBuys() });
-  }
-  if (path === '/api/insider-buys/add' && method === 'POST') {
-    const body = await readBody(req);
-    const { sym, name, person, role, shares, price, date, notes } = body;
-    if (!sym || !date) return json(res, { error: 'sym and date required' }, 400);
-    const existing = loadInsiderBuys();
-    existing.unshift({
-      sym: sym.includes(':') ? sym : `TADAWUL:${sym}`,
-      name: name || sym,
-      person: person || 'Unknown',
-      role:   role   || 'Insider',
-      shares: +shares || 0,
-      price:  +price  || 0,
-      value:  (+shares||0)*(+price||0),
-      date,
-      notes:  notes || '',
-      added:  new Date().toISOString(),
-    });
-    saveInsiderBuys(existing);
-    return json(res, { ok: true, buys: existing });
-  }
-  if (path === '/api/insider-buys/delete' && method === 'POST') {
-    const body = await readBody(req);
-    const { sym, date } = body;
-    const filtered = loadInsiderBuys().filter(b => !(b.sym.endsWith(sym) && b.date === date));
-    saveInsiderBuys(filtered);
-    return json(res, { ok: true });
-  }
+  // /api/insider-buys (GET/refresh/add/delete) removed Phase 4 — insider UI cut Phase 1, tables empty, never collected.
 
   // ── CMA Filing Monitor ─────────────────────────────────────────────────────
   if (path === '/api/cma/filings' && method === 'GET') {
