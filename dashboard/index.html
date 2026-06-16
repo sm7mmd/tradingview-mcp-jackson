@@ -5352,6 +5352,23 @@ function calBadgeHtml(event){
   return`<span class="cal-badge${urgent?' urgent':''}" title="Earnings ${event.date} ${hour}">📅 ${t('calEarnings')} ${when}</span>`;
 }
 
+// Catalyst risk flags (validated "don't buy now" signals: debt/earnings/management).
+// Bulk-loaded once; defensive entry-timing warning, not alpha.
+const riskCache={}; let _riskLoaded=false;
+async function loadRiskFlags(){
+  try{
+    const r=await fetch('/api/catalyst/risks').then(x=>x.json());
+    Object.keys(riskCache).forEach(k=>delete riskCache[k]);
+    Object.assign(riskCache, r.flags||{});
+  }catch(_){}
+  _riskLoaded=true;
+}
+function riskBadgeHtml(flags){
+  if(!flags||!flags.length) return'';
+  const notes=flags.map(f=>'• '+f.note+' ('+f.date+')').join('\n');
+  return`<span class="risk-badge" title="Catalyst risk — avoid a fresh entry right now:\n${notes}" style="font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:10px;background:#ff525222;color:#ff5252;border:1px solid #ff525244;margin-inline-start:4px;cursor:help">⚠ Risk</span>`;
+}
+
 // ── Trade journal / analytics ─────────────────────────────────────────────────
 function closeTrade(sym){
   const tr=document.querySelector(`.pos-close-row[data-sym="${sym}"]`);
@@ -5993,6 +6010,7 @@ function renderTable(){
   renderBeginnerTable();
   const tbody=document.getElementById('screener-body');
   if(!scanData.length) return;
+  if(!_riskLoaded){ loadRiskFlags().then(renderTable); } // load risk flags once, then re-render with badges
   let rows=getVisibleRows();
   rows.sort((a,b)=>{ const av=sortVal(a,sortKey),bv=sortVal(b,sortKey),cmp=typeof av==='string'?av.localeCompare(bv):av-bv; return sortAsc?cmp:-cmp; });
   // Update match count
@@ -6052,7 +6070,7 @@ function renderTable(){
     return`<tr data-sym="${r.sym}" class="${sel?'selected-row':''}" onclick="onRowClick(event,'${r.sym}')">
       <td class="cb-cell"><input type="checkbox" class="row-cb" ${sel?'checked':''} onclick="event.stopPropagation();toggleRow('${r.sym}',this.checked)"><button class="wl-star ${isWatched(r.sym)?'wl-active':''}" data-sym="${r.sym}" onclick="event.stopPropagation();toggleWatchlist('${r.sym}',event)" title="${isWatched(r.sym)?'Remove from watchlist':'Add to watchlist'}">${isWatched(r.sym)?'★':'☆'}</button></td>
       <td class="td-ticker">${ticker}</td>
-      <td class="td-name">${r.name}${r.ar?`<span class="ar-name" dir="rtl">${r.ar}</span>`:''}${positionBadgeHtml(r.sym,r.price)}${calCache[r.sym]?calBadgeHtml(calCache[r.sym]):''}${retryHtml}${r.whale_score>=7?'<span class="whale-badge" title="Extreme whale activity — whale score '+r.whale_score+'/10">🐋🐋🐋</span>':r.whale_score>=5?'<span class="whale-badge" title="Significant whale activity — score '+r.whale_score+'/10">🐋🐋</span>':r.whale_score>=3?'<span class="whale-badge" title="Unusual activity — score '+r.whale_score+'/10">🐋</span>':''}${(()=>{const sTags=(r.style_tags||[]).length?'<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">'+(r.style_tags).map(s=>{const sc={'Momentum':'#5ba3ff','Trend':'#00e676','Breakout':'#ffd740','Recovery':'#3d8bff','Pullback':'#33d1e5'}[s]||'var(--text3)';return`<span style="font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44;cursor:pointer" onclick="event.stopPropagation();filterStyle('${s}',document.querySelector('[onclick*=filterStyle][onclick*=${s}]'))">${s}</span>`;}).join('')+'</div>':'';const pBadges=(r.patterns||[]).map(p=>{const pc=p.bullish?'#00e5aa':'#ff5252';return`<span style="font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:${pc}15;color:${pc};border:1px solid ${pc}33" title="${p.desc}">⬦ ${p.name}</span>`;}).join('');const pDiv=pBadges?`<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">${pBadges}</div>`:'';return sTags+pDiv;})()}</td>
+      <td class="td-name">${r.name}${r.ar?`<span class="ar-name" dir="rtl">${r.ar}</span>`:''}${positionBadgeHtml(r.sym,r.price)}${calCache[r.sym]?calBadgeHtml(calCache[r.sym]):''}${riskCache[r.sym]?riskBadgeHtml(riskCache[r.sym]):''}${retryHtml}${r.whale_score>=7?'<span class="whale-badge" title="Extreme whale activity — whale score '+r.whale_score+'/10">🐋🐋🐋</span>':r.whale_score>=5?'<span class="whale-badge" title="Significant whale activity — score '+r.whale_score+'/10">🐋🐋</span>':r.whale_score>=3?'<span class="whale-badge" title="Unusual activity — score '+r.whale_score+'/10">🐋</span>':''}${(()=>{const sTags=(r.style_tags||[]).length?'<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">'+(r.style_tags).map(s=>{const sc={'Momentum':'#5ba3ff','Trend':'#00e676','Breakout':'#ffd740','Recovery':'#3d8bff','Pullback':'#33d1e5'}[s]||'var(--text3)';return`<span style="font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44;cursor:pointer" onclick="event.stopPropagation();filterStyle('${s}',document.querySelector('[onclick*=filterStyle][onclick*=${s}]'))">${s}</span>`;}).join('')+'</div>':'';const pBadges=(r.patterns||[]).map(p=>{const pc=p.bullish?'#00e5aa':'#ff5252';return`<span style="font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:${pc}15;color:${pc};border:1px solid ${pc}33" title="${p.desc}">⬦ ${p.name}</span>`;}).join('');const pDiv=pBadges?`<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">${pBadges}</div>`:'';return sTags+pDiv;})()}</td>
       <td class="hm"><span class="sector-badge sector-${sec}">${sectorLabel(sec)}</span></td>
       <td class="td-price" title="${nativeCcy(r.sym)} price · toggle header to convert">${priceV}</td>
       <td style="text-align:end;font-weight:700;font-size:12px;color:${chgCol};font-family:'JetBrains Mono',monospace">${chgV}</td>
