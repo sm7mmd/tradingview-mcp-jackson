@@ -3191,6 +3191,7 @@ td { padding: 10px 14px !important; }
 
   <div class="tabs">
     <button class="tab active" onclick="switchTab('screener',this)"  data-i18n="tabScreener" title="Screener::Scan all stocks in your universe and rank them by signal strength. Run a Full Scan to get the latest readings.">Screener</button>
+    <button class="tab" onclick="switchTab('momentum',this)"          id="tab-momentum"       title="Momentum Screen::Your monthly buy-list — the one strategy proven to beat the market on your real constraints (Sharia-compliant, low-cost Derayah, established liquid names ranked by 6-month momentum). Open it once a month, buy the list, hold, repeat.">📈 Momentum</button>
     <button class="tab" onclick="switchTab('goals',this)"            id="tab-goals"          title="Goals &amp; Objectives::Set and track your trading targets — win rate goals, return targets, and trade consistency metrics.">🎯 Goals</button>
     <button class="tab" onclick="switchTab('lab',this)"              id="tab-lab"            title="Accuracy Lab::Analyze your trade history to discover which setups work best for you — by score, RSI zone, sector, and hold time.">🔬 Lab</button>
     <button class="tab" onclick="switchTab('markets',this)"          data-i18n="tabMarkets"  title="Markets Overview::Global market conditions at a glance — index levels, sector heat maps, and macro signals to frame the day.">🌍 Markets</button>
@@ -3418,6 +3419,13 @@ td { padding: 10px 14px !important; }
   <div class="panel" id="panel-goals">
     <div id="goals-content">
       <div class="empty-state"><div class="icon">🎯</div><p>Loading goals…</p></div>
+    </div>
+  </div>
+
+  <!-- Momentum Screen (validated monthly buy-list) -->
+  <div class="panel" id="panel-momentum">
+    <div id="momentum-content">
+      <div class="empty-state"><div class="icon">📈</div><p>Loading momentum screen…</p></div>
     </div>
   </div>
 
@@ -4895,6 +4903,8 @@ function switchTab(name,btn){
   if(name==='goals'){ loadGoalsPanel(); }
   // Lab tab
   if(name==='lab'){ loadLabPanel(); }
+  // Momentum Screen tab
+  if(name==='momentum'){ loadMomentumScreen(); }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -11177,15 +11187,22 @@ function renderLabPanel(d) {
   </table></div>` : '';
 
   // Win-rate breakdown by category (loaded async after main render)
-  el.innerHTML = `<div id="lab-momentum-section"></div><div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
-  loadMomentumScreen();
+  const momentumPointer = `<div class="lab-insight-card" style="border-color:var(--accent);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="switchTab('momentum',document.getElementById('tab-momentum'))" title="Momentum Screen::The one validated edge that beats the market on your real constraints. It now lives in its own tab — click to open the monthly buy-list.">
+    <span style="font-size:20px">📈</span>
+    <div style="flex:1">
+      <div style="font-size:12px;font-weight:800;color:var(--text)">Momentum Screen — the validated edge</div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.4">Sharia-compliant, liquid, ≥2y-listed names ranked by 6-month momentum; excess +10–15%/yr vs basket, t=2.6–3.2, OOS-stable. The Lab proves the engine works — the buy-list lives in its own tab.</div>
+    </div>
+    <span style="font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap">Open Momentum →</span>
+  </div>`;
+  el.innerHTML = momentumPointer + `<div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
   loadLabValidation();
   loadLabWinRates();
 }
 
 // ── Momentum Screen: the validated monthly buy-list (Sharia + liquid + ≥2y + top-quintile 6mo momentum) ──
 async function loadMomentumScreen() {
-  const el = document.getElementById('lab-momentum-section');
+  const el = document.getElementById('momentum-content');
   if (!el) return;
   el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)"><div style="font-size:11px;color:var(--text3)">Loading momentum screen…</div></div>`;
   try {
@@ -11194,30 +11211,30 @@ async function loadMomentumScreen() {
     const col = v => v > 0 ? 'var(--green)' : v < 0 ? '#ff5252' : 'var(--text3)';
     const rows = d.holdings.map(h => `<tr>
       <td style="font-size:10px;color:var(--text3);text-align:center">${h.rank}</td>
-      <td style="font-size:11px;font-weight:600;color:var(--text)">${h.name} <span style="color:var(--text3);font-weight:400">${h.code}</span></td>
+      <td style="font-size:11px;font-weight:600;color:var(--text);cursor:help" title="${h.name} (${h.code})::Why it's eligible (Sharia): ${(h.sharia||'').replace(/"/g,'')}">${h.name} <span style="color:var(--text3);font-weight:400">${h.code}</span></td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${h.price}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;font-weight:700;color:${col(h.mom6)}">${h.mom6 >= 0 ? '+' : ''}${h.mom6}%</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:${col(h.ret1m)}">${h.ret1m >= 0 ? '+' : ''}${h.ret1m}%</td>
     </tr>`).join('');
     const v = d.validated, p = d.params, u = d.universe, sn = d.seasonal || {};
-    const seasonBanner = sn.currentMonthName ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:8px;background:${sn.inSeason ? 'var(--green)' : '#ff5252'}1a;border:1px solid ${sn.inSeason ? 'var(--green)' : '#ff5252'}55">
+    const seasonBanner = sn.currentMonthName ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:8px;cursor:help;background:${sn.inSeason ? 'var(--green)' : '#ff5252'}1a;border:1px solid ${sn.inSeason ? 'var(--green)' : '#ff5252'}55" title="Seasonal overlay::Over many years, two calendar months (here May & Oct) have been reliably weak for Saudi stocks. Sitting in cash during just those months shrank the scary drops without giving up returns. This banner tells you whether the current month is safe to be invested (IN SEASON) or one to wait out (SIT OUT).">
         <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;background:${sn.inSeason ? 'var(--green)' : '#ff5252'};color:#000">${sn.inSeason ? 'IN SEASON' : 'SIT OUT'}</span>
         <span style="font-size:10px;color:var(--text2);line-height:1.4">Seasonal overlay · ${sn.note} <span style="color:var(--text3)">Weakest months: ${(sn.weakestMonthNames || []).join(' & ')}.</span></span>
       </div>` : '';
     el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-        <span style="font-size:12px;font-weight:800;color:var(--text)">Momentum Screen</span>
-        <span style="font-size:10px;color:var(--text3)">monthly buy-list · Sharia-compliant · liquid · ≥2y listed · top-quintile 6mo momentum</span>
+        <span style="font-size:12px;font-weight:800;color:var(--text);cursor:help" title="Momentum Screen::A monthly shopping list of stocks to buy. It picks the Saudi shares that have climbed the most over the past 6 months — the idea (called momentum) is that recent winners tend to keep winning for a while. You refresh the list once a month.">Momentum Screen</span>
+        <span style="font-size:10px;color:var(--text3);cursor:help" title="How the list is filtered::Start with Sharia-compliant stocks only → keep the easier-to-trade half (liquid) → keep only companies listed at least 2 years (skip fresh IPOs, whose prices are too jumpy) → then take the top 20% by 6-month gain.">monthly buy-list · Sharia-compliant · liquid · ≥2y listed · top-quintile 6mo momentum</span>
       </div>
       ${seasonBanner}
-      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px">The one validated edge on your real constraints (Derayah ${p.cost}). Backtest: excess <strong style="color:var(--green)">${v.excessPerYr}</strong> vs equal-weight compliant basket · abs CAGR ${v.absCagr} · t=${v.nwT} · maxDD ${v.maxDD}. <span style="color:var(--yellow)">${v.caveat}</span></div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px">The one validated edge on your real constraints (<span style="cursor:help" title="Trading cost::Derayah charges no commission — only ~0.11% in regulatory fees for a full buy-and-sell round trip. Low cost is what makes a monthly-rebalanced strategy worthwhile.">Derayah ${p.cost}</span>). Backtest: <span style="cursor:help" title="Excess return::How much MORE this strategy made per year than just owning every compliant stock equally. This is the honest measure of skill — beating a fair benchmark, not just going up with the market.">excess</span> <strong style="color:var(--green)">${v.excessPerYr}</strong> vs equal-weight compliant basket · <span style="cursor:help" title="Absolute return (CAGR)::The actual compounded yearly growth of the money itself — what your account balance would do per year, on average.">abs CAGR ${v.absCagr}</span> · <span style="cursor:help" title="Statistical significance (t-stat)::How sure we are this is a real pattern and not luck. Above 2 means it would rarely happen by chance; this scores 2.6–3.2, which is solid.">t=${v.nwT}</span> · <span style="cursor:help" title="Maximum drawdown::The worst drop from a peak to a low you'd have lived through. Smaller is better — and this strategy's worst drop was milder than the market's.">maxDD ${v.maxDD}</span>. <span style="color:var(--yellow);cursor:help" title="Important caveats::The numbers are honest but not bulletproof: the data only includes companies still trading today (shave ~1–1.5%/yr for that), and the Sharia screen is partly sector-based — double-check each name's financial ratios (debt, interest income) before you actually buy it.">${v.caveat}</span></div>
       <div class="lab-stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
-        <div class="lab-stat"><div class="lab-stat-val" style="font-size:18px;color:var(--text)">${u.holdings}</div><div class="lab-stat-lbl">equal-weight picks</div><div style="font-size:9px;color:var(--text3);margin-top:3px">${p.weighting}</div></div>
-        <div class="lab-stat"><div class="lab-stat-val" style="font-size:18px;color:var(--text)">${u.eligible}</div><div class="lab-stat-lbl">eligible / ${u.compliant} compliant</div><div style="font-size:9px;color:var(--text3);margin-top:3px">liquid half = ${u.liquid}</div></div>
-        <div class="lab-stat" style="border-color:var(--accent)"><div class="lab-stat-val" style="font-size:15px;color:var(--accent)">${d.nextRebalance}</div><div class="lab-stat-lbl">next rebalance</div><div style="font-size:9px;color:var(--text3);margin-top:3px">as of ${d.asOf}</div></div>
+        <div class="lab-stat" style="cursor:help" title="Equal-weight picks::How many stocks to hold. You split your money evenly across all of them (about ${p.weighting.replace('equal-weight (~','').replace(')','')}), so no single stock can sink you.">${''}<div class="lab-stat-val" style="font-size:18px;color:var(--text)">${u.holdings}</div><div class="lab-stat-lbl">equal-weight picks</div><div style="font-size:9px;color:var(--text3);margin-top:3px">${p.weighting}</div></div>
+        <div class="lab-stat" style="cursor:help" title="How the list narrows::Of ${u.compliant} Sharia-compliant names, ${u.eligible} have enough price history to rank. We then keep the ${u.liquid} most-liquid (easiest to buy and sell) and pick the top fifth of those by momentum."><div class="lab-stat-val" style="font-size:18px;color:var(--text)">${u.eligible}</div><div class="lab-stat-lbl">eligible / ${u.compliant} compliant</div><div style="font-size:9px;color:var(--text3);margin-top:3px">liquid half = ${u.liquid}</div></div>
+        <div class="lab-stat" style="border-color:var(--accent);cursor:help" title="Next rebalance::The date to redo this screen — re-rank, drop names that fell out of the top list, add new winners. Momentum fades, so it must be refreshed monthly."><div class="lab-stat-val" style="font-size:15px;color:var(--accent)">${d.nextRebalance}</div><div class="lab-stat-lbl">next rebalance</div><div style="font-size:9px;color:var(--text3);margin-top:3px">as of ${d.asOf}</div></div>
       </div>
       <div class="lab-table-wrap"><table class="lab-table">
-        <thead><tr><th style="text-align:center">#</th><th>Name</th><th style="text-align:end">Price</th><th style="text-align:end">Mom 6mo</th><th style="text-align:end">Last 1mo</th></tr></thead>
+        <thead><tr><th style="text-align:center;cursor:help" title="Rank::Position by 6-month gain. #1 is the strongest recent performer.">#</th><th style="cursor:help" title="Company::The stock name and its 4-digit Tadawul code. Hover a row to see why it counts as Sharia-compliant.">Name</th><th style="text-align:end;cursor:help" title="Price::Most recent closing price, in Saudi Riyals.">Price</th><th style="text-align:end;cursor:help" title="6-month momentum::How much the share rose (or fell) over roughly the last 6 months, ignoring the most recent month. This number decides the ranking.">Mom 6mo</th><th style="text-align:end;cursor:help" title="Last month::Return over the past month — shown for context only. The strategy deliberately skips this most-recent month when ranking, because very-recent moves tend to reverse.">Last 1mo</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
       <div style="font-size:9px;color:var(--text3);margin-top:8px">Hold equal-weight until ${d.nextRebalance}, then re-screen. Sit out the 2 historically-weakest months (seasonal overlay) for lower drawdown.</div>
     </div>`;
