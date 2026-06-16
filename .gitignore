@@ -4,7 +4,13 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Secrets — never commit
 .env
+.env.*
+!.env.example
+
+# Databases
 dashboard/mawjah.db
 dashboard/mawjah.db-shm
 dashboard/mawjah.db-wal
@@ -21,6 +27,9 @@ dashboard/mawjah.db-wal
 .playwright-mcp/
 skills-lock.json
 auth-test.cjs
+
+# Install-time symlink created by the one-shot setup (generated, not tracked)
+AGENTS.md
 
 # Dev screenshots (root)
 /*.png
