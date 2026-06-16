@@ -24,6 +24,7 @@ import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, g
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
+import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
@@ -2577,6 +2578,13 @@ const server = createServer(async (req, res) => {
   if (path === '/api/lab/momentum' && method === 'GET') {
     try {
       return json(res, await getMomentumScreen());
+    } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Block-deal signal: validated "follow big premium trades, ~1mo hold" watch-list.
+  if (path === '/api/lab/blockdeals' && method === 'GET') {
+    try {
+      return json(res, await getBlockDealSignal());
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
   }
 

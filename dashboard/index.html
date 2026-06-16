@@ -3193,7 +3193,7 @@ td { padding: 10px 14px !important; }
 
   <div class="tabs">
     <button class="tab active" onclick="switchTab('screener',this)"  data-i18n="tabScreener" title="Screener::Scan all stocks in your universe and rank them by signal strength. Run a Full Scan to get the latest readings.">Screener</button>
-    <button class="tab" onclick="switchTab('momentum',this)"          id="tab-momentum"       title="Momentum Screen::Your monthly buy-list — the one strategy proven to beat the market on your real constraints (Sharia-compliant, low-cost Derayah, established liquid names ranked by 6-month momentum). Open it once a month, buy the list, hold, repeat.">📈 Momentum</button>
+    <button class="tab" onclick="switchTab('momentum',this)"          id="tab-momentum"       title="Signals::The validated edges proven to beat the market on your real constraints (Sharia-compliant, low-cost Derayah). Two signals live here: the monthly Momentum buy-list (recent winners), and the Block-Deal signal (follow big premium trades, ~1-month hold).">📊 Signals</button>
     <button class="tab" onclick="switchTab('goals',this)"            id="tab-goals"          title="Goals &amp; Objectives::Set and track your trading targets — win rate goals, return targets, and trade consistency metrics.">🎯 Goals</button>
     <button class="tab" onclick="switchTab('lab',this)"              id="tab-lab"            title="Accuracy Lab::Analyze your trade history to discover which setups work best for you — by score, RSI zone, sector, and hold time.">🔬 Lab</button>
     <button class="tab" onclick="switchTab('markets',this)"          data-i18n="tabMarkets"  title="Markets Overview::Global market conditions at a glance — index levels, sector heat maps, and macro signals to frame the day.">🌍 Markets</button>
@@ -3429,6 +3429,7 @@ td { padding: 10px 14px !important; }
     <div id="momentum-content">
       <div class="empty-state"><div class="icon">📈</div><p>Loading momentum screen…</p></div>
     </div>
+    <div id="blockdeal-content"></div>
   </div>
 
   <!-- Accuracy Lab -->
@@ -4905,8 +4906,8 @@ function switchTab(name,btn){
   if(name==='goals'){ loadGoalsPanel(); }
   // Lab tab
   if(name==='lab'){ loadLabPanel(); }
-  // Momentum Screen tab
-  if(name==='momentum'){ loadMomentumScreen(); }
+  // Momentum Screen tab (+ block-deal signal)
+  if(name==='momentum'){ loadMomentumScreen(); loadBlockDealSignal(); }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -11290,7 +11291,7 @@ function renderLabPanel(d) {
       <div style="font-size:12px;font-weight:800;color:var(--text)">Momentum Screen — the validated edge</div>
       <div style="font-size:10px;color:var(--text3);line-height:1.4">Sharia-compliant, liquid, ≥2y-listed names ranked by 6-month momentum; excess +10–15%/yr vs basket, t=2.6–3.2, OOS-stable. The Lab proves the engine works — the buy-list lives in its own tab.</div>
     </div>
-    <span style="font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap">Open Momentum →</span>
+    <span style="font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap">Open Signals →</span>
   </div>`;
   el.innerHTML = momentumPointer + `<div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
   loadLabValidation();
@@ -11336,6 +11337,42 @@ async function loadMomentumScreen() {
       <div style="font-size:9px;color:var(--text3);margin-top:8px">Hold equal-weight until ${d.nextRebalance}, then re-screen. Sit out the 2 historically-weakest months (seasonal overlay) for lower drawdown.</div>
     </div>`;
   } catch(_) { el.innerHTML = `<div class="lab-insight-card"><div style="font-size:10px;color:var(--text3)">Momentum screen failed to load.</div></div>`; }
+}
+
+// ── Block-Deal Signal: validated "follow big premium trades, ~1-month hold" watch-list ──
+async function loadBlockDealSignal() {
+  const el = document.getElementById('blockdeal-content');
+  if (!el) return;
+  el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px"><div style="font-size:11px;color:var(--text3)">Loading block-deal signal…</div></div>`;
+  try {
+    const d = await fetch('/api/lab/blockdeals').then(r => r.json());
+    if (!d.success) { el.innerHTML = ''; return; }
+    const col = v => v > 0 ? 'var(--green)' : v < 0 ? '#ff5252' : 'var(--text3)';
+    const sh = s => s === 'compliant' ? '<span style="color:#2dd4bf" title="Sharia::Passes the compliance screen — verify financial ratios before buying.">✓ halal</span>' : `<span style="color:var(--yellow)" title="Sharia::Not on the compliant list (${s}). Excluded from your tradeable set.">⚠ ${s}</span>`;
+    const rows = (d.signals || []).map(s => `<tr style="${s.sharia === 'compliant' ? '' : 'opacity:.55'}">
+      <td style="font-size:11px;font-weight:600;color:var(--text)" title="Block deal on ${s.dealDate} at ${s.dealPrice} (${s.valueM}M SAR), ${s.premiumPct >= 0 ? '+' : ''}${s.premiumPct}% vs market.::${s.cls === 'premium' ? 'A buyer paid up — the bullish case.' : 'Traded at market — clean accumulation.'}">${s.name} <span style="color:var(--text3);font-weight:400">${s.code}</span></td>
+      <td style="font-size:10px;text-align:center"><span style="padding:1px 6px;border-radius:10px;background:rgba(45,212,191,.14);color:#2dd4bf;font-weight:700">${s.cls}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)" title="How far above the market price the block traded — bigger premium = more aggressive buyer.">${s.premiumPct >= 0 ? '+' : ''}${s.premiumPct}%</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:${col(s.sinceDealPct)}" title="Price change since the deal day.">${s.sinceDealPct >= 0 ? '+' : ''}${s.sinceDealPct}%</td>
+      <td style="font-size:10px;text-align:end;color:var(--text2)" title="Trading days left in the validated ~20-session (1-month) hold window.">${s.sessionsLeft}d</td>
+      <td style="font-size:10px;text-align:end">${sh(s.sharia)}</td>
+    </tr>`).join('');
+    const v = d.validated || {}, u = d.universe || {};
+    const body = !(d.signals || []).length
+      ? `<div style="font-size:10px;color:var(--text3);padding:4px 0">${d.note || 'No active big-premium block deals right now.'}</div>`
+      : `<div class="lab-table-wrap"><table class="lab-table">
+          <thead><tr><th>Name</th><th style="text-align:center">Sign</th><th style="text-align:end">Premium</th><th style="text-align:end">Since deal</th><th style="text-align:end">Window</th><th style="text-align:end">Halal</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <div style="font-size:9px;color:var(--text3);margin-top:8px">${u.skippedDiscount || 0} discount deals skipped (sellers — they lose money). Hold each name to the end of its window, then drop it. Data as of ${d.asOf}.</div>`;
+    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent);margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:800;color:var(--text)">Block-Deal Signal 🐋</span>
+        <span style="font-size:10px;color:var(--text3)">follow big premium trades · ~1-month hold · skip discounts</span>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px" title="Validated edge::A big trade (block deal) printed at or above market price means an aggressive buyer is building a position. Buying alongside and holding ~1 month made money in testing. A big trade at a discount is a motivated seller — it beats the average but loses money, so we skip it.">When a <strong>large trade</strong> prints <strong>at or above</strong> the market price (a buyer paying up), the stock tends to make money over the next ~month. Validated: <strong style="color:var(--green)">${v.absReturn || ''}</strong>, excess ${v.excess || ''}. <span style="color:var(--yellow)">${v.discountWarning || ''}</span></div>
+      ${body}
+    </div>`;
+  } catch(_) { el.innerHTML = ''; }
 }
 
 // ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──
