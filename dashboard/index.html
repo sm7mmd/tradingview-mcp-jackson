@@ -3627,16 +3627,7 @@ td { padding: 10px 14px !important; }
       <span class="mkt-ts" id="mkt-ts"></span>
     </div>
     <div class="mkt-grid" id="mkt-grid"><div class="mkt-loading"><span class="spin">⟳</span><span data-i18n="mktLoading">Loading market data (requires TradingView)…</span></div></div>
-    <div class="scoring-card">
-      <div class="scoring-card-header">
-        <h3 title="Top Opportunities::AI-generated summary of the highest-conviction setups from your last scan — ranked by score, style alignment, and market context. Refreshes automatically after each scan.">🎯 Top Opportunities</h3>
-        <span style="display:flex;align-items:center;gap:8px">
-          <span id="opp-ts" style="font-size:10px;color:var(--text3)"></span>
-          <button class="btn btn-secondary" id="opp-regen-btn" onclick="refreshOpportunities()" style="font-size:10px;padding:2px 8px;display:inline-flex" title="Regenerate::Re-run the opportunity detection engine on the most recent scan data. No new scan is needed — this re-ranks existing results using the latest signal patterns.">⟳ Regenerate</button>
-        </span>
-      </div>
-      <div style="padding:12px 14px"><div class="opp-grid" id="opp-grid"><div style="color:var(--text3);font-size:12px">Run a scan first — AI analysis generates automatically.</div></div></div>
-    </div>
+    <!-- Top Opportunities removed Phase 1 — score-derived ranking; the 9-pt score has no edge (t=0.74) -->
 
     <!-- ── Sector Breadth ────────────────────────────────────────────────────── -->
     <div class="port-section-divider" style="margin-top:18px" title="Sector Breadth::Shows which sectors have the most stocks with active buy signals right now. A sector with 70%+ bullish breadth is in a strong trend — this helps you size up positions in leading sectors with confidence.">📊 Sector Breadth
@@ -3682,21 +3673,7 @@ td { padding: 10px 14px !important; }
       <div class="macro-cal-scroll" id="macro-cal-scroll"><div class="macro-empty">Loading events…</div></div>
     </div>
 
-    <!-- Insider Buying -->
-    <div class="port-section-divider" style="margin-top:18px" title="Insider Buying::When company directors and executives buy their own stock with personal money, it's a strong signal of confidence. This section tracks those purchases auto-fetched from Argaam. Insider buys often precede major moves.">🔍 Insider Buying <span>Director &amp; executive purchases · auto-fetched from Argaam · <button class="btn btn-secondary" onclick="refreshInsiderBuys()" id="ib-refresh-btn" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button> <span title="Argaam scraping is fragile — site changes may break auto-fetch silently. Use manual entry as fallback." style="font-size:10px;color:var(--yellow);cursor:help;margin-left:4px">⚠ scraper</span></span></div>
-    <div class="whale-section">
-      <div class="insider-form">
-        <input id="ib-sym"    class="add-criteria-input" placeholder="Code e.g. 2222" style="width:80px">
-        <input id="ib-person" class="add-criteria-input" placeholder="Person name" style="width:110px">
-        <input id="ib-role"   class="add-criteria-input" placeholder="Role (CEO, Director…)" style="width:120px">
-        <input id="ib-shares" class="add-criteria-input" placeholder="Shares" type="number" style="width:80px">
-        <input id="ib-price"  class="add-criteria-input" placeholder="Price SAR" type="number" step="0.01" style="width:80px">
-        <input id="ib-date"   class="add-criteria-input" type="date" style="width:120px">
-        <input id="ib-notes"  class="add-criteria-input" placeholder="Notes" style="flex:1;min-width:80px">
-        <button class="btn btn-primary" onclick="addInsiderBuy()" style="font-size:11px;padding:4px 10px">+ Add</button>
-      </div>
-      <div id="insider-buys-list"><div class="whale-empty">Loading insider buys…</div></div>
-    </div>
+    <!-- Insider Buying removed Phase 1 — DB tables empty, collection never ran (dead UI) -->
 
     <!-- ── CMA Filing Monitor ─────────────────────────────────────────────── -->
     <div class="port-section-divider" style="margin-top:18px" title="CMA Ownership Filings::Capital Market Authority mandatory disclosures — any institution crossing a 5% ownership threshold must file publicly. Unlike anonymous block deals, these filings name the institution and confirm whether they bought or sold.">
@@ -3758,13 +3735,9 @@ td { padding: 10px 14px !important; }
     <div class="port-section-divider" style="margin-top:18px" title="Portfolio Backtest::Simulates the full strategy historically across your universe — how much would 100K SAR have grown? Uses the same 9-criterion scoring with a max of 5 simultaneous positions to model realistic capital allocation.">📈 Portfolio Backtest <span>Simulate strategy across full universe · capital-constrained · <button class="btn btn-secondary" onclick="runPortfolioBt()" id="port-bt-btn" style="font-size:10px;padding:2px 8px;display:inline-flex">▶ Run</button></span></div>
     <div id="port-bt-result" style="padding:10px 14px;font-size:11px;color:var(--text3)">Click Run to simulate the strategy across TASI with 100K SAR capital, max 5 concurrent positions.</div>
 
-    <!-- Whale Watch embedded in Markets -->
-    <div class="port-section-divider" style="margin-top:18px" title="Whale Watch::Tracks unusual institutional-scale activity — large block deals and abnormal volume spikes that suggest big money is moving. A whale score of 7+ on any stock is a notable signal worth investigating alongside your screener score.">🐋 Whale Watch <span>Institutional activity · auto-fetched from Argaam · <button class="btn btn-secondary" onclick="loadWhaleTab(true)" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button> <span title="Argaam scraping is fragile — site changes may break auto-fetch silently. Use manual entry as fallback." style="font-size:10px;color:var(--yellow);cursor:help;margin-left:4px">⚠ scraper</span></span></div>
+    <!-- Block-deal manual log (whale_score "Volume Activity" removed Phase 1 — tested at -8.9%/yr, no edge) -->
+    <div class="port-section-divider" style="margin-top:18px" title="Block Deals::Large off-market transactions logged from Argaam + manual entry. The validated, tradeable block-deal signal (follow big premium buyers, ~1-month hold) lives in the Signals tab — this is the raw log.">🏦 Block Deals <span>Off-market institutional trades · auto-fetched from Argaam · <button class="btn btn-secondary" onclick="loadWhaleTab(true)" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button> <span title="Argaam scraping is fragile — site changes may break auto-fetch silently. Use manual entry as fallback." style="font-size:10px;color:var(--yellow);cursor:help;margin-left:4px">⚠ scraper</span></span></div>
     <div class="whale-two-col">
-      <div class="whale-section">
-        <div class="whale-section-title" title="Volume Activity::Stocks from your last scan ranked by whale score — a composite of volume spike magnitude, price movement, and block deal frequency. Higher = more likely institutional involvement.">📊 Volume Activity <span class="whale-section-sub">From last scan · sorted by whale score</span></div>
-        <div id="whale-activity-list"><div class="whale-empty">Run a scan first to see whale activity.</div></div>
-      </div>
       <div class="whale-section">
         <div class="whale-section-title" title="Block Deals::Large off-market transactions — when institutions trade huge lots privately, it shows up here. The buyer and seller are anonymous, but the size and price tell you where big money transacted. A block deal above 5M SAR near a key support level is significant.">🏦 Block Deals <span class="whale-section-sub" id="block-deals-source">Auto-fetched from Argaam + manual entry</span></div>
         <div class="bd-entry-form">
@@ -4901,7 +4874,7 @@ function switchTab(name,btn){
   // Settings tab
   if(name==='universe'){ renderScoringRules(); loadUniversePanel(); }
   // Markets tab
-  if(name==='markets'){ loadMarketsPanel(); renderOpportunities(); loadStrategyValidation(); loadPlaybook(); }
+  if(name==='markets'){ loadMarketsPanel(); loadStrategyValidation(); loadPlaybook(); }
   // Goals tab
   if(name==='goals'){ loadGoalsPanel(); }
   // Lab tab
@@ -5166,11 +5139,9 @@ function connectSSE(){
           const panel=document.getElementById('presignal-panel');
           if(panel&&panel.style.display!=='none') loadPreSignal();
         }).catch(()=>{});
-        // Auto-refresh Markets + opportunities after every full scan
+        // Auto-refresh Markets after every full scan
         if (!d.quickScan) {
           loadMarketsPanel(true);
-          // Give the server 3s to finish generating opportunities, then load
-          setTimeout(() => loadOpportunities(true), 3000);
         }
       } else if(d.type === 'live_stopped'){
         liveActive=false; updateLiveBtn();
@@ -7061,7 +7032,6 @@ async function loadMarketsPanel(force=false){
   // Load macro panel alongside market data
   loadMacroPanel(force);
   loadWhaleTab(force);
-  loadInsiderBuys();
 }
 
 // ── Market helper (mirrors server logic) ──────────────────────────────────────
@@ -7223,8 +7193,6 @@ function renderMarketsPanel(d){
       <div class="mkt-52w"><div class="mkt-52w-fill"></div><div class="mkt-52w-cur" style="inset-inline-start:${pos}%"></div></div>
     </div>`;
   }).join('');
-  // Opportunities
-  renderOpportunities();
 }
 
 // ── Opportunity signal definitions (mirrors server SIGNAL_DEFS) ──────────────
@@ -9916,7 +9884,6 @@ async function loadMacroPanel(force=false) {
 
 // ── Whale Watch ──────────────────────────────────────────────────────────────
 async function loadWhaleTab(force=false) {
-  renderWhaleActivity();
   await loadBlockDeals(force);
 }
 
@@ -10475,7 +10442,6 @@ async function refreshCMAFilings() {
 // Called from loadWhaleTab — now also loads CMA filings
 const _origLoadWhaleTab = loadWhaleTab;
 async function loadWhaleTab(force=false) {
-  renderWhaleActivity();
   await loadBlockDeals(force);
   await loadCMAFilings(force);
 }
