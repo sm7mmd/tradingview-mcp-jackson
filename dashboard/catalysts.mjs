@@ -47,8 +47,12 @@ export function classify(headline) {
 const toISO = (d) => {
   if (!d) return null;
   if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
-  const m = d.match(/(\d{2})\/(\d{2})\/(\d{4})/);             // DD/MM/YYYY
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  const m = d.match(/(\d{2})\/(\d{2})\/(\d{4})/);             // DD/MM/YYYY (Tadawul default)
+  if (!m) return null;
+  let dd = +m[1], mm = +m[2]; const y = m[3];
+  if (mm > 12 && dd <= 12) [dd, mm] = [mm, dd];              // row was MM/DD — swap
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;   // unparseable — drop
+  return `${y}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 };
 
 const _ins = db.prepare(`INSERT OR IGNORE INTO catalyst_events (sym, event_date, type, headline, source) VALUES (?, ?, ?, ?, ?)`);
@@ -62,6 +66,42 @@ export function ingestCatalysts(events, source = 'tadawul') {
     inserted += _ins.run(`TADAWUL:${code}`, date, type, (e.headline || '').slice(0, 240), source).changes;
   }
   return { events: events.length, inserted, skipped };
+}
+
+// ── Risk flags ────────────────────────────────────────────────────────────────
+// The event types that significantly predict SHORT-TERM weakness in the event study
+// (forward excess vs basket, t < -2.5 at n>50). These are "don't buy right now"
+// defensive signals — the one genuinely useful, validated output of the catalyst
+// work. NOT alpha (you can't short TASI); they're entry-timing risk warnings.
+export const RISK_META = {
+  capital_ops: { window: 10, note: 'Debt/sukuk issuance — significant short-term weakness (5d excess −1.8%, t=−3.2)' },
+  earnings:    { window: 7,  note: 'Recent earnings — sell-the-news short-term weakness (5d excess −0.7%, t=−2.7)' },
+  management:  { window: 5,  note: 'Management/board resignation — next-day weakness (1d excess −0.9%, t=−2.5)' },
+};
+
+// Risk flags for one symbol: risk-type catalysts within their relevance window.
+export function getRiskFlags(sym, asOf = null) {
+  const today = asOf || new Date().toISOString().slice(0, 10);
+  const flags = [];
+  for (const [type, meta] of Object.entries(RISK_META)) {
+    const cutoff = new Date(Date.now() - meta.window * 86400000).toISOString().slice(0, 10);
+    const rows = db.prepare(
+      'SELECT event_date, headline FROM catalyst_events WHERE sym=? AND type=? AND event_date >= ? AND event_date <= ? ORDER BY event_date DESC'
+    ).all(sym, type, cutoff, today);
+    for (const r of rows) flags.push({ type, date: r.event_date, note: meta.note, headline: r.headline });
+  }
+  return flags;
+}
+
+// Bulk: map of sym -> flags for every symbol with an active risk catalyst.
+export function getActiveRiskFlags() {
+  const out = {};
+  for (const [type, meta] of Object.entries(RISK_META)) {
+    const cutoff = new Date(Date.now() - meta.window * 86400000).toISOString().slice(0, 10);
+    const rows = db.prepare('SELECT sym, event_date, headline FROM catalyst_events WHERE type=? AND event_date >= ?').all(type, cutoff);
+    for (const r of rows) (out[r.sym] ||= []).push({ type, date: r.event_date, note: meta.note, headline: r.headline });
+  }
+  return out;
 }
 
 export function catalystsSummary() {

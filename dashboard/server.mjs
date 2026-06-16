@@ -23,6 +23,7 @@ import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
+import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -2582,6 +2583,19 @@ const server = createServer(async (req, res) => {
         return json(res, { ok: true, signal: calibrateSignal({ signal_type: type, score, regime, horizon }) });
       }
       return json(res, { ok: true, ...getCalibration({ horizon }) });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Catalyst risk flags — "don't buy right now" defensive warnings from validated
+  // negative catalysts (debt issuance / earnings / management change). Not alpha.
+  if (path === '/api/catalyst/risks' && method === 'GET') {
+    try { return json(res, { ok: true, flags: getActiveRiskFlags() }); }
+    catch(e) { return json(res, { error: e.message }, 500); }
+  }
+  if (path.startsWith('/api/catalyst/risk/') && method === 'GET') {
+    try {
+      const sym = decodeURIComponent(path.slice('/api/catalyst/risk/'.length));
+      return json(res, { ok: true, sym, flags: getRiskFlags(sym) });
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 
