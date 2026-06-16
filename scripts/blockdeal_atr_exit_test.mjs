@@ -97,6 +97,20 @@ async function main() {
     const j = Math.min(i + MAXH, d.c.length - 1);
     return { ret: d.c[j] / entry - 1, held: j - i };
   }
+  // close-based trail: stop only triggers on a CLOSE below it (no wick exits); trails off
+  // the running peak CLOSE. Exit booked at that day's close.
+  function simTrailClose(d, i, kInit, kTrail) {
+    const atr = atrAt(d.h, d.l, d.c, i); if (!atr) return null;
+    const entry = d.c[i]; let stop = entry - kInit * atr, peak = entry;
+    for (let j = i + 1; j <= i + MAXH && j < d.c.length; j++) {
+      const hd = j - i;
+      if (d.c[j] <= stop) return { ret: d.c[j] / entry - 1, held: hd };
+      peak = Math.max(peak, d.c[j]);
+      stop = Math.max(stop, peak - kTrail * atr);
+    }
+    const j = Math.min(i + MAXH, d.c.length - 1);
+    return { ret: d.c[j] / entry - 1, held: j - i };
+  }
 
   const rules = [
     ['FIXED 20 (hold)', (d, i) => simFixed(d, i)],
@@ -110,6 +124,9 @@ async function main() {
     ['trail 3.0 ATR', (d, i) => simTrail(d, i, 3.0, 3.0)],
     ['trail init2 trail3', (d, i) => simTrail(d, i, 2.0, 3.0)],
     ['trail init1.5 trail2.5', (d, i) => simTrail(d, i, 1.5, 2.5)],
+    ['trailCLOSE 2.0 ATR', (d, i) => simTrailClose(d, i, 2.0, 2.0)],
+    ['trailCLOSE 3.0 ATR', (d, i) => simTrailClose(d, i, 3.0, 3.0)],
+    ['trailCLOSE init2 trail3', (d, i) => simTrailClose(d, i, 2.0, 3.0)],
   ];
 
   console.log(`\n=== BLOCK-DEAL EXIT TEST — ATR bracket vs fixed ${MAXH}-session hold ===`);
