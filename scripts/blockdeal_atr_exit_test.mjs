@@ -82,6 +82,21 @@ async function main() {
     return { ret: d.c[j] / entry - 1, held: j - i };   // timeout
   }
   function simFixed(d, i) { const j = i + MAXH; return { ret: d.c[j] / d.c[i] - 1, held: MAXH }; }
+  // trailing stop: ratchet a stop up under the running peak. kInit = initial stop distance,
+  // kTrail = trail distance (ATR units, fixed off entry ATR). Lets winners run, caps downside.
+  function simTrail(d, i, kInit, kTrail) {
+    const atr = atrAt(d.h, d.l, d.c, i); if (!atr) return null;
+    const entry = d.c[i]; let stop = entry - kInit * atr, peak = entry;
+    for (let j = i + 1; j <= i + MAXH && j < d.c.length; j++) {
+      const hd = j - i;
+      if (d.o[j] <= stop) return { ret: d.o[j] / entry - 1, held: hd };   // gap through stop
+      if (d.l[j] <= stop) return { ret: stop / entry - 1, held: hd };     // intrabar stop
+      peak = Math.max(peak, d.h[j]);
+      stop = Math.max(stop, peak - kTrail * atr);                          // ratchet up only
+    }
+    const j = Math.min(i + MAXH, d.c.length - 1);
+    return { ret: d.c[j] / entry - 1, held: j - i };
+  }
 
   const rules = [
     ['FIXED 20 (hold)', (d, i) => simFixed(d, i)],
@@ -91,6 +106,10 @@ async function main() {
     ['stop1.0 tgt3.0 (1:3)', (d, i) => simBracket(d, i, 1.0, 3.0)],
     ['stop3.0 tgt3.0 (wide)', (d, i) => simBracket(d, i, 3.0, 3.0)],
     ['stop2.0 tgt6.0 (1:3)', (d, i) => simBracket(d, i, 2.0, 6.0)],
+    ['trail 2.0 ATR', (d, i) => simTrail(d, i, 2.0, 2.0)],
+    ['trail 3.0 ATR', (d, i) => simTrail(d, i, 3.0, 3.0)],
+    ['trail init2 trail3', (d, i) => simTrail(d, i, 2.0, 3.0)],
+    ['trail init1.5 trail2.5', (d, i) => simTrail(d, i, 1.5, 2.5)],
   ];
 
   console.log(`\n=== BLOCK-DEAL EXIT TEST — ATR bracket vs fixed ${MAXH}-session hold ===`);
