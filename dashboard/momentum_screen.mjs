@@ -20,7 +20,7 @@ const sd = a => { if (a.length < 2) return NaN; const m = a.reduce((x, y) => x +
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504 } = {}) {
+export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15 } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
   await warm(ysyms, '10y');                       // cache-aware; refetches only if stale
@@ -55,6 +55,10 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     sharia: getShariaStatus(r.sym).basis,
   }));
 
+  // ── Position sizing — Scheme D (vol-target + seasonal sit-out), validated in
+  // scripts/momentum_sizing_test.mjs: cuts worst year −21%→−8%, maxDD −26%→−15% at ~same
+  // Sharpe. Scale gross exposure so the holdings' realized vol ≈ targetVol; go to cash in
+  // a weak month. Equal-weight within holdings (inverse-vol added nothing in the test).
   const asOf = rows.map(r => r.asOf).sort().at(-1);
   const d = new Date(asOf);
   const nextRebalance = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
@@ -75,12 +79,39 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
       : `${MONTHS[currentMonth]} is not a weak month — overlay says STAY INVESTED.`,
   };
 
+  // ── Position sizing — Scheme D (vol-target + seasonal sit-out), validated in
+  // scripts/momentum_sizing_test.mjs: cuts worst year −21%→−8%, maxDD −26%→−15% at ~same
+  // Sharpe. Scale gross exposure so the holdings' realized vol ≈ targetVol; cash in a weak
+  // month. Equal-weight within holdings (inverse-vol added nothing in the test).
+  const dayRet = {};                                  // date → [holding daily returns]
+  for (const h of holdings) {
+    const b = await getBars(toYahooSym(h.sym), '10y'); if (b.length < 95) continue;
+    const c = b.map(x => x.c);
+    for (let k = c.length - 90; k < c.length; k++) { if (k < 1) continue; const r = c[k] / c[k - 1] - 1; if (isFinite(r)) (dayRet[b[k].t] ||= []).push(r); }
+  }
+  const portDaily = Object.keys(dayRet).sort().map(t => mean(dayRet[t])).filter(isFinite);
+  const realizedVol = portDaily.length >= 20 ? sd(portDaily) * Math.sqrt(252) : null;
+  let exposure = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
+  if (!seasonal.inSeason) exposure = 0;               // weak month → sit out
+  const exposurePct = +(exposure * 100).toFixed(0);
+  const sizing = {
+    model: 'vol-target + seasonal sit-out (Scheme D)',
+    targetVolPct: +(targetVol * 100).toFixed(0),
+    realizedVolPct: realizedVol ? +(realizedVol * 100).toFixed(0) : null,
+    exposurePct, cashPct: 100 - exposurePct,
+    perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
+    note: exposure === 0
+      ? `Weak month — model says HOLD CASH (0% invested).`
+      : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget — it lowers exposure when the market gets choppy so a bad year (e.g. 2025) costs ~−8% not ~−21%.`,
+  };
+
   return {
     success: true, asOf, nextRebalance,
     universe: { compliant: compliant.length, eligible: rows.length, liquid: liquid.length, holdings: holdings.length },
     params: { lookback: '6mo (skip last 1mo)', minListing: '≥2y listed', liquidFilter: 'liquid half', quintile: 'top 20%', rebalance: 'monthly', cost: '0.11% RT (Derayah)', weighting: `equal-weight (~${weight}% each)` },
     validated: { excessPerYr: '+10 to +15%/yr', absCagr: '15–25%/yr', nwT: '2.6–3.2', maxDD: '~−26% (better than basket)', caveat: 'OOS-stable; survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
     seasonal,
+    sizing,
     holdings,
   };
 }
