@@ -17,7 +17,7 @@
 import { getBars, iso } from './bars_cache.mjs';
 import { toYahooSym, TASI_STOCKS } from './tasi_screener.mjs';
 
-const COST_RT = 0.0061;
+const COST_RT = +process.env.COST_RT || 0.0011;
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const tstat = a => a.length > 1 ? +(mean(a) / (sd(a) / Math.sqrt(a.length))).toFixed(2) : NaN;

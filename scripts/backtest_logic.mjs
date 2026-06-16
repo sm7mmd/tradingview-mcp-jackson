@@ -19,7 +19,7 @@ import {
 } from './tasi_screener.mjs';
 
 const HORIZONS = [5, 10, 20];
-const COST_RT  = 0.0031 + 0.0030;
+const COST_RT  = +process.env.COST_RT || 0.0011;  // Derayah 0.11% RT (env override)
 const MODE     = 'swing';
 const MIN_HISTORY = 210;       // need EMA200 + buffer before a day is testable
 

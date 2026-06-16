@@ -23,7 +23,7 @@ import { db } from '../dashboard/db.js';
 import { fetchYahooOHLCV, toYahooSym, TASI_STOCKS } from './tasi_screener.mjs';
 
 const RISK = { capital_ops: 10, earnings: 7, management: 5 };  // type -> active window (days)
-const COST_SIDE = 0.00305;                                     // 0.305% per side (0.61% RT)
+const COST_SIDE = (+process.env.COST_RT || 0.0011) / 2;  // Derayah 0.11% RT
 const TODAY = new Date().toISOString().slice(0, 10);
 const iso = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
