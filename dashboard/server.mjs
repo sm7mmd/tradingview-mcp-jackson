@@ -1553,20 +1553,7 @@ const server = createServer(async (req, res) => {
       ...startScan(quickList, market, state.scan.mode || 'swing', true) });
   }
 
-  if (path === "/api/whale/activity" && method === "GET") {
-    const results = (state.scan.results || [])
-      .filter(r => r.whale_score != null && r.whale_score > 0)
-      .sort((a, b) => (b.whale_score || 0) - (a.whale_score || 0))
-      .map(r => {
-        // Count consecutive recent scans with elevated whale activity
-        const hist = (state.score_history[r.sym] || []).slice(-10);
-        // Use bias as proxy: count consecutive recent BUY/STRONG BUY/WATCH scans from latest
-        const bullishStreak = [...hist].reverse().findIndex(h => !['STRONG BUY','BUY','WATCH'].includes(h.b));
-        const streak = bullishStreak === -1 ? hist.length : bullishStreak;
-        return { ...r, streak };
-      });
-    return json(res, { results, lastRun: state.scan.lastRun });
-  }
+  // /api/whale/activity removed Phase 4 — whale_score has no edge (tested -8.9%/yr, t=-1.47)
 
   if (path === "/api/whale/block-deals" && method === "GET") {
     blockDealsCache.ts = 0; // force refresh to include latest manual deals
@@ -2248,37 +2235,8 @@ const server = createServer(async (req, res) => {
     return json(res, { events: getUpcomingEvents(days) });
   }
 
-  if (path === "/api/opportunities" && method === "GET") {
-    const minConv = parseInt(url.searchParams.get('min') || '30');
-    const limit   = parseInt(url.searchParams.get('limit') || '20');
-    dbOppSignals.expireOld();
-    const rows = dbOppSignals.getActive(minConv, limit);
-    const opportunities = rows.map(r => ({
-      id: r.id, sym: r.sym, name: r.payload.name || r.name,
-      signal_type: r.signal_type, conviction: r.conviction,
-      confluence: r.payload.confluence || 1,
-      headline: r.payload.headline, note: r.payload.note,
-      price: r.payload.price, score: r.payload.score, maxScore: r.payload.maxScore,
-      bias: r.payload.bias, regime: r.payload.regime,
-      stop: r.payload.stop, target1: r.payload.target1, target2: r.payload.target2,
-      rsi: r.payload.rsi, vol_ratio: r.payload.vol_ratio,
-      whale_score: r.payload.whale_score, mfi: r.payload.mfi,
-      blockDeals: r.payload.blockDeals, cmaBuys: r.payload.cmaBuys,
-      insiders: r.payload.insiders, blockDealDates: r.payload.blockDealDates,
-      cmaSummary: r.payload.cmaSummary, insiderSummary: r.payload.insiderSummary,
-      trajectory: r.payload.trajectory, eta: r.payload.eta, scansLeft: r.payload.scansLeft,
-      detected_at: r.detected_at, refreshed_at: r.refreshed_at,
-      expires_at: r.expires_at,
-      discovery_price: r.discovery_price,
-    }));
-    return json(res, { opportunities, scanTs: state.scan.lastRun, generatedAt: state.scan.lastRun, signalDefs: SIGNAL_DEFS });
-  }
-
-  if (path === "/api/opportunities/refresh" && method === "POST") {
-    if (!state.scan.results?.length) return json(res, { error: 'No scan results — run a scan first' }, 400);
-    detectAndStoreSignals(state.scan.results).catch(() => {});
-    return json(res, { ok: true, message: 'Signal detection running — refresh /api/opportunities in 2s' });
-  }
+  // /api/opportunities (+ /refresh) removed Phase 4 — score-derived ranking; 9-pt score has no edge (t=0.74).
+  // detectAndStoreSignals kept (scan-pipeline detector); dbOppSignals/SIGNAL_DEFS kept (used elsewhere).
 
   // ── Strategy Validation ──────────────────────────────────────────────────────
   if (path === '/api/strategy-validation' && method === 'GET') {
@@ -2660,41 +2618,7 @@ const server = createServer(async (req, res) => {
   }
 
   // Insider buys
-  if (path === '/api/insider-buys' && method === 'GET') {
-    return json(res, { buys: loadInsiderBuys() });
-  }
-  if (path === '/api/insider-buys/refresh' && method === 'POST') {
-    insiderRefreshTs = 0; // bypass TTL for manual refresh
-    const result = await fetchAndStoreInsiderBuys();
-    return json(res, { ...result, buys: loadInsiderBuys() });
-  }
-  if (path === '/api/insider-buys/add' && method === 'POST') {
-    const body = await readBody(req);
-    const { sym, name, person, role, shares, price, date, notes } = body;
-    if (!sym || !date) return json(res, { error: 'sym and date required' }, 400);
-    const existing = loadInsiderBuys();
-    existing.unshift({
-      sym: sym.includes(':') ? sym : `TADAWUL:${sym}`,
-      name: name || sym,
-      person: person || 'Unknown',
-      role:   role   || 'Insider',
-      shares: +shares || 0,
-      price:  +price  || 0,
-      value:  (+shares||0)*(+price||0),
-      date,
-      notes:  notes || '',
-      added:  new Date().toISOString(),
-    });
-    saveInsiderBuys(existing);
-    return json(res, { ok: true, buys: existing });
-  }
-  if (path === '/api/insider-buys/delete' && method === 'POST') {
-    const body = await readBody(req);
-    const { sym, date } = body;
-    const filtered = loadInsiderBuys().filter(b => !(b.sym.endsWith(sym) && b.date === date));
-    saveInsiderBuys(filtered);
-    return json(res, { ok: true });
-  }
+  // /api/insider-buys (GET/refresh/add/delete) removed Phase 4 — insider UI cut Phase 1, tables empty, never collected.
 
   // ── CMA Filing Monitor ─────────────────────────────────────────────────────
   if (path === '/api/cma/filings' && method === 'GET') {
