@@ -1,6 +1,6 @@
 /**
  * Unit tests for the strategy state machine decision logic (pure, no DB).
- * Run: node --test tests/strategy_state.test.js
+ * Run: node --experimental-sqlite --test tests/strategy_state.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
