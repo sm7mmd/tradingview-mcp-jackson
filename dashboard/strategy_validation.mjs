@@ -78,6 +78,24 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
   const cagr = yrs > 0 ? Math.pow(eq, 1 / yrs) - 1 : NaN;
   const grade = gradeStatus({ t, netMean: mean(ex), n: periods.length, h1t: tstat(h1), h2t: tstat(h2) });
 
+  // Rolling-window evidence for the state machine (most recent periods).
+  const tail = (k) => ex.slice(Math.max(0, ex.length - k));
+  const rollMean = mean(tail(12));
+  const rollT = tstat(tail(12));
+  const roll18Mean = mean(tail(18));
+  // current drawdown = equity now vs running peak of compounded abs equity
+  let ceq = 1, cpk = 1;
+  for (const r of abs) { ceq *= 1 + r; cpk = Math.max(cpk, ceq); }
+  const curDD = cpk > 0 ? ceq / cpk - 1 : 0;
+  const evidence = {
+    n: periods.length, t: +(t || 0).toFixed(2),
+    halfT1: +(tstat(h1) || 0).toFixed(2), halfT2: +(tstat(h2) || 0).toFixed(2),
+    netMean: +(mean(ex) || 0).toFixed(5),
+    rollMean: +(rollMean || 0).toFixed(5), rollT: +(rollT || 0).toFixed(2),
+    roll18Mean: +(roll18Mean || 0).toFixed(5),
+    currentDD: +(curDD).toFixed(4),
+  };
+
   // per-year excess for the developing-over-time view
   const byYear = {};
   for (const p of periods) (byYear[p.year] ||= []).push(p.excess);
@@ -96,6 +114,7 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
       half1_t: +(tstat(h1) || 0).toFixed(2), half2_t: +(tstat(h2) || 0).toFixed(2),
       avg_names: periods.length ? Math.round(mean(periods.map(p => p.n))) : 0,
       yearly,
+      evidence,
     }],
     note: 'One observation per non-overlapping 20-session rebalance (cross-sectional-clustering-robust). Equal-weight basket benchmark, COVID carved out.',
   };
