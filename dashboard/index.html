@@ -11143,11 +11143,21 @@ async function loadLabStrategy() {
         <div class="lab-regime-strip" style="margin-top:10px;font-size:10px" title="Promotion gate::A strategy is PROMOTED only when its edge is positive, statistically real (t>2), holds across BOTH halves of history, and has enough periods (≥24). Otherwise it stays a CANDIDATE until the data earns it.">
           <strong>${s.status === 'promoted' ? '✓ Promoted' : s.status === 'candidate' ? '◷ Candidate' : s.status}:</strong> ${s.statusWhy}. Halves t = ${s.half1_t} / ${s.half2_t}.
         </div>
+        ${s.recommendedAction === 'promote' ? `<div style="margin-top:8px"><button class="btn btn-primary" style="font-size:11px;padding:4px 12px" onclick="promoteStrategy('${s.id}')" title="Promote::The strategy cleared the gate (real, significant, stable). Click to deploy it at full Scheme-D sizing. Cutting back later is automatic; adding risk needs this click.">▲ Promote to live (${s.exposure_mult > 0 ? 'increase' : 'deploy'})</button></div>` : ''}
+        ${(s.transitions && s.transitions.length) ? `<div style="font-size:9px;color:var(--text3);margin-top:8px;line-height:1.6">History: ${s.transitions.map(t => `${t.at} ${t.from || '—'}→${t.to} <span style="opacity:.7">(${t.actor})</span>`).join(' · ')}</div>` : ''}
+        <div style="font-size:10px;color:var(--text2);margin-top:6px">Effective exposure now: <strong>${Math.round((s.exposure_mult || 0) * 100)}%</strong> of Scheme-D sizing (state: ${s.status}).</div>
         <div style="font-size:10px;color:var(--text3);margin-top:8px;line-height:1.5">Per-year excess (develops over time): ${yrs}</div>
       </div>`;
     }).join('');
     el.innerHTML = cards;
   } catch(_) { el.innerHTML = ''; }
+}
+
+async function promoteStrategy(id) {
+  if (!confirm('Promote this strategy to live (full Scheme-D sizing)? Risk-reduction stays automatic; this confirms adding risk.')) return;
+  const r = await fetch('/api/lab/strategy/promote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }));
+  if (!r.ok) { alert('Could not promote: ' + (r.error || 'error')); return; }
+  loadLabStrategy();
 }
 
 async function loadLabValidation() {
