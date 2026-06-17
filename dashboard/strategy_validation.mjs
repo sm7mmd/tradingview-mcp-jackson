@@ -13,6 +13,7 @@
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
 import { getShariaStatus } from './sharia.mjs';
+import { evaluate, getState, transitions } from './strategy_state.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
 const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
@@ -96,6 +97,9 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     currentDD: +(curDD).toFixed(4),
   };
 
+  const stRes = evaluate('momentum-sharia', evidence);
+  const st = getState('momentum-sharia');
+
   // per-year excess for the developing-over-time view
   const byYear = {};
   for (const p of periods) (byYear[p.year] ||= []).push(p.excess);
@@ -106,7 +110,10 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     strategies: [{
       id: 'momentum-sharia', name: 'Momentum (Sharia)',
       spec: 'compliant ∩ liquid-half ∩ ≥2y · top-quintile 6-1mo momentum · monthly · equal-weight',
-      status: grade.status, statusWhy: grade.why,
+      status: st.state, statusWhy: grade.why,
+      exposure_mult: st.exposure_mult,
+      recommendedAction: stRes.recommendedAction,
+      transitions: transitions('momentum-sharia', 6).map(t => ({ from: t.from_state, to: t.to_state, actor: t.actor, reason: t.reason, at: t.at.slice(0, 10) })),
       periods: periods.length, span: periods.length ? `${periods[0].date} → ${periods.at(-1).date}` : null,
       excess_per_period: +(mean(ex) * 100).toFixed(2), t: +(t || 0).toFixed(2),
       win_rate: periods.length ? +(ex.filter(x => x > 0).length / periods.length * 100).toFixed(0) : 0,
