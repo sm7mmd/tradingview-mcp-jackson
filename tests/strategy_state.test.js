@@ -85,3 +85,18 @@ describe('decide — no auto up', () => {
     assert.equal(r.actor, null);
   });
 });
+
+describe('decide — thin-data evidence (null rolling stats)', () => {
+  // When too few periods exist, strategy_validation emits null rolling fields.
+  // The null guards must prevent a spurious decay/retire on a healthy promoted strategy.
+  it('null rolling stats do not auto-decay a promoted strategy', () => {
+    const r = decide('promoted', { ...pass, rollMean: null, rollT: null, roll18Mean: null });
+    assert.equal(r.state, 'promoted');
+    assert.equal(r.actor, null);
+  });
+  it('DD floor still retires even with null rolling stats', () => {
+    const r = decide('promoted', { ...pass, rollMean: null, rollT: null, roll18Mean: null, currentDD: -0.31 });
+    assert.equal(r.state, 'retired');
+    assert.equal(r.actor, 'auto');
+  });
+});
