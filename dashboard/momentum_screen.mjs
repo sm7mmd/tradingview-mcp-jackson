@@ -15,6 +15,7 @@
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
 import { getShariaStatus } from './sharia.mjs';
+import { getState } from './strategy_state.mjs';
 
 const sd = a => { if (a.length < 2) return NaN; const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
@@ -93,6 +94,9 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   const realizedVol = portDaily.length >= 20 ? sd(portDaily) * Math.sqrt(252) : null;
   let exposure = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
   if (!seasonal.inSeason) exposure = 0;               // weak month → sit out
+  // State-machine governor: candidate/retired→0, decaying→×0.5, promoted→×1.0
+  const stateMult = getState('momentum-sharia').exposure_mult;
+  exposure = exposure * stateMult;
   const exposurePct = +(exposure * 100).toFixed(0);
   const sizing = {
     model: 'vol-target + seasonal sit-out (Scheme D)',
@@ -101,8 +105,10 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     exposurePct, cashPct: 100 - exposurePct,
     perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
     note: exposure === 0
-      ? `Weak month — model says HOLD CASH (0% invested).`
-      : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget — it lowers exposure when the market gets choppy so a bad year (e.g. 2025) costs ~−8% not ~−21%.`,
+      ? (stateMult === 0
+          ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
+          : `Weak month — model says HOLD CASH (0% invested).`)
+      : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`,
   };
 
   return {
