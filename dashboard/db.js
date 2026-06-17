@@ -193,6 +193,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_so_pending ON signal_outcomes(graded_at, entry_date);
   CREATE INDEX IF NOT EXISTS idx_so_type    ON signal_outcomes(signal_type, horizon);
 
+  CREATE TABLE IF NOT EXISTS strategy_state (
+    strategy_id   TEXT PRIMARY KEY,
+    state         TEXT NOT NULL,
+    since         TEXT,
+    evidence      TEXT,
+    exposure_mult REAL NOT NULL DEFAULT 0,
+    updated_at    TEXT
+  );
+  CREATE TABLE IF NOT EXISTS strategy_transitions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id TEXT NOT NULL,
+    from_state  TEXT,
+    to_state    TEXT NOT NULL,
+    reason      TEXT,
+    actor       TEXT NOT NULL,
+    evidence    TEXT,
+    at          TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS cma_filings (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     sym           TEXT NOT NULL,          -- TADAWUL:XXXX
