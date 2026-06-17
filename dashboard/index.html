@@ -3437,6 +3437,28 @@ td { padding: 10px 14px !important; }
     <div id="lab-content">
       <div class="empty-state"><div class="icon">🔬</div><p>Loading lab…</p></div>
     </div>
+
+    <!-- ── Strategy Validation (moved from Markets — shadow-trade learning loop) ── -->
+    <div class="port-section-divider" style="margin-top:18px" title="Strategy Validation::Track setups you're watching but haven't traded — &quot;shadow trades.&quot; Compare against what actually happened to learn which signals have edge in your market, without risking real money.">📊 Strategy Validation
+      <span>Track opportunities · learn what works · <button class="btn btn-secondary" onclick="loadStrategyValidation()" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button></span>
+    </div>
+    <div id="sv-root" style="padding:2px 0">
+      <!-- Tab bar -->
+      <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:10px">
+        <button class="sv-tab active" onclick="svTab('tracks')" id="svt-tracks" title="Open Tracks::Shadow trades you're currently monitoring — setups you liked but didn't enter. They stay open until you close them manually or they hit a signal change.">📌 Open Tracks</button>
+        <button class="sv-tab" onclick="svTab('closed')" id="svt-closed" title="Closed Tracks::Completed shadow trades with their outcome. Did the setup work? Compare your hypothesis to reality to sharpen your pattern recognition.">✅ Closed</button>
+        <button class="sv-tab" onclick="svTab('leaderboard')" id="svt-leaderboard" title="What Works::Leaderboard of your best-performing setup types — by score tier, style tag, sector, and RSI zone. Your personal edge, data-driven.">🏆 What Works</button>
+        <button class="sv-tab" onclick="svTab('insights')" id="svt-insights" title="Edge Map::Visual breakdown of which combinations of criteria produced the best outcomes in your history. Helps you refine which signals to trust most.">🔬 Edge Map</button>
+      </div>
+      <div id="sv-panel-tracks"></div>
+      <div id="sv-panel-closed" style="display:none"></div>
+      <div id="sv-panel-leaderboard" style="display:none"></div>
+      <div id="sv-panel-insights" style="display:none"></div>
+    </div>
+
+    <!-- ── Portfolio Backtest (moved from Markets — research simulation) ── -->
+    <div class="port-section-divider" style="margin-top:18px" title="Portfolio Backtest::Simulates the full strategy historically across your universe — how much would 100K SAR have grown? Uses the same 9-criterion scoring with a max of 5 simultaneous positions to model realistic capital allocation.">📈 Portfolio Backtest <span>Simulate strategy across full universe · capital-constrained · <button class="btn btn-secondary" onclick="runPortfolioBt()" id="port-bt-btn" style="font-size:10px;padding:2px 8px;display:inline-flex">▶ Run</button></span></div>
+    <div id="port-bt-result" style="padding:10px 14px;font-size:11px;color:var(--text3)">Click Run to simulate the strategy across TASI with 100K SAR capital, max 5 concurrent positions.</div>
   </div>
 
   <!-- Positions -->
@@ -3589,10 +3611,10 @@ td { padding: 10px 14px !important; }
       <div class="rule-form">
         <input id="rule-name"  class="add-criteria-input" style="flex:2;min-width:120px" placeholder="Rule name (e.g. Al Rajhi Score≥6)">
         <input id="rule-sym"   class="add-criteria-input" style="max-width:110px" placeholder="Symbol">
-        <select id="rule-field" class="rule-select">
-          <option value="score">Score</option>
+        <select id="rule-field" class="rule-select" title="Score and Bias are DESCRIPTIVE state labels (the 9-criterion score), not return predictors — the score has no measured edge (t=0.74). Use them to get notified about state changes, not as buy/sell triggers. The validated, tradeable edges live in the Signals tab.">
+          <option value="score">Score (descriptive)</option>
           <option value="rsi">RSI</option>
-          <option value="bias">Bias</option>
+          <option value="bias">Bias (descriptive)</option>
         </select>
         <select id="rule-op" class="rule-select">
           <option value="gte">≥</option>
@@ -3601,6 +3623,9 @@ td { padding: 10px 14px !important; }
         </select>
         <input id="rule-threshold" class="add-criteria-input" style="max-width:90px" placeholder="Value / STRONG BUY">
         <button class="btn btn-success" style="font-size:11px;padding:5px 10px" onclick="addAlertRule()" data-i18n="univAdd">+ Add</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3);padding:8px 2px 0;line-height:1.5">
+        ⚠ <strong>Score</strong> and <strong>Bias</strong> are descriptive state labels — the 9-criterion score has <strong>no measured edge</strong> (t=0.74). Alert on them to track state changes, not as buy/sell triggers. For validated, tradeable signals see the <strong>📊 Signals</strong> tab.
       </div>
     </div>
   </div>
@@ -3637,24 +3662,7 @@ td { padding: 10px 14px !important; }
       <div style="color:var(--text3);font-size:12px;padding:10px 0">Run a scan to see sector breakdown.</div>
     </div>
 
-    <!-- Macro Calendar -->
-    <!-- ── Strategy Validation ─────────────────────────────────────────────── -->
-    <div class="port-section-divider" style="margin-top:18px" title="Strategy Validation::Track setups you're watching but haven't traded — &quot;shadow trades.&quot; Compare against what actually happened to learn which signals have edge in your market, without risking real money.">📊 Strategy Validation
-      <span>Track opportunities · learn what works · <button class="btn btn-secondary" onclick="loadStrategyValidation()" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button></span>
-    </div>
-    <div id="sv-root" style="padding:2px 0">
-      <!-- Tab bar -->
-      <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:10px">
-        <button class="sv-tab active" onclick="svTab('tracks')" id="svt-tracks" title="Open Tracks::Shadow trades you're currently monitoring — setups you liked but didn't enter. They stay open until you close them manually or they hit a signal change.">📌 Open Tracks</button>
-        <button class="sv-tab" onclick="svTab('closed')" id="svt-closed" title="Closed Tracks::Completed shadow trades with their outcome. Did the setup work? Compare your hypothesis to reality to sharpen your pattern recognition.">✅ Closed</button>
-        <button class="sv-tab" onclick="svTab('leaderboard')" id="svt-leaderboard" title="What Works::Leaderboard of your best-performing setup types — by score tier, style tag, sector, and RSI zone. Your personal edge, data-driven.">🏆 What Works</button>
-        <button class="sv-tab" onclick="svTab('insights')" id="svt-insights" title="Edge Map::Visual breakdown of which combinations of criteria produced the best outcomes in your history. Helps you refine which signals to trust most.">🔬 Edge Map</button>
-      </div>
-      <div id="sv-panel-tracks"></div>
-      <div id="sv-panel-closed" style="display:none"></div>
-      <div id="sv-panel-leaderboard" style="display:none"></div>
-      <div id="sv-panel-insights" style="display:none"></div>
-    </div>
+    <!-- Strategy Validation + Portfolio Backtest moved to Lab tab (research belongs next to Accuracy Lab) -->
 
     <!-- ── Macro Calendar (kept, Morning Brief removed) ────────────────────── -->
     <div class="port-section-divider" style="margin-top:18px" title="Macro Calendar::Economic events scheduled over the next 21 days — interest rate decisions, inflation reports, earnings releases, and other market-moving dates. High-impact events (red) can cause sharp moves; plan your trades around them.">🌐 Macro Calendar <span>Upcoming events · <button class="btn btn-secondary" onclick="loadMacroPanel(true)" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button></span></div>
@@ -3730,10 +3738,6 @@ td { padding: 10px 14px !important; }
       </div>
       <div id="cma-filings-list"><div class="whale-empty">No CMA filings loaded. Click ⟳ Refresh or add manually from cma.org.sa</div></div>
     </div>
-
-    <!-- Portfolio Backtest -->
-    <div class="port-section-divider" style="margin-top:18px" title="Portfolio Backtest::Simulates the full strategy historically across your universe — how much would 100K SAR have grown? Uses the same 9-criterion scoring with a max of 5 simultaneous positions to model realistic capital allocation.">📈 Portfolio Backtest <span>Simulate strategy across full universe · capital-constrained · <button class="btn btn-secondary" onclick="runPortfolioBt()" id="port-bt-btn" style="font-size:10px;padding:2px 8px;display:inline-flex">▶ Run</button></span></div>
-    <div id="port-bt-result" style="padding:10px 14px;font-size:11px;color:var(--text3)">Click Run to simulate the strategy across TASI with 100K SAR capital, max 5 concurrent positions.</div>
 
     <!-- Block-deal manual log (whale_score "Volume Activity" removed Phase 1 — tested at -8.9%/yr, no edge) -->
     <div class="port-section-divider" style="margin-top:18px" title="Block Deals::Large off-market transactions logged from Argaam + manual entry. The validated, tradeable block-deal signal (follow big premium buyers, ~1-month hold) lives in the Signals tab — this is the raw log.">🏦 Block Deals <span>Off-market institutional trades · auto-fetched from Argaam · <button class="btn btn-secondary" onclick="loadWhaleTab(true)" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button> <span title="Argaam scraping is fragile — site changes may break auto-fetch silently. Use manual entry as fallback." style="font-size:10px;color:var(--yellow);cursor:help;margin-left:4px">⚠ scraper</span></span></div>
@@ -4874,11 +4878,11 @@ function switchTab(name,btn){
   // Settings tab
   if(name==='universe'){ renderScoringRules(); loadUniversePanel(); }
   // Markets tab
-  if(name==='markets'){ loadMarketsPanel(); loadStrategyValidation(); loadPlaybook(); }
+  if(name==='markets'){ loadMarketsPanel(); loadPlaybook(); }
   // Goals tab
   if(name==='goals'){ loadGoalsPanel(); }
   // Lab tab
-  if(name==='lab'){ loadLabPanel(); }
+  if(name==='lab'){ loadLabPanel(); loadStrategyValidation(); }
   // Momentum Screen tab (+ block-deal signal)
   if(name==='momentum'){ loadMomentumScreen(); loadBlockDealSignal(); }
 }
