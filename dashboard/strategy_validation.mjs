@@ -92,8 +92,9 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     n: periods.length, t: +(t || 0).toFixed(2),
     halfT1: +(tstat(h1) || 0).toFixed(2), halfT2: +(tstat(h2) || 0).toFixed(2),
     netMean: +(mean(ex) || 0).toFixed(5),
-    rollMean: +(rollMean || 0).toFixed(5), rollT: +(rollT || 0).toFixed(2),
-    roll18Mean: +(roll18Mean || 0).toFixed(5),
+    rollMean: (rollMean == null || isNaN(rollMean)) ? null : +rollMean.toFixed(5),
+    rollT: (rollT == null || isNaN(rollT)) ? null : +rollT.toFixed(2),
+    roll18Mean: (roll18Mean == null || isNaN(roll18Mean)) ? null : +roll18Mean.toFixed(5),
     currentDD: +(curDD).toFixed(4),
   };
 

@@ -605,6 +605,13 @@ async function runValidationGradeThrottled() {
     _valBarsCache.clear();
     const res = await gradePending({ getBars: _valGetBars, universe: TASI_STOCKS.map(s => s.sym) });
     console.log(`[validation] graded ${res.graded}, pending ${res.stillPending}`);
+    // Strategy state machine: force a fresh (uncached) evaluation so AUTO risk-down
+    // transitions persist daily, independent of anyone opening the Lab page.
+    try {
+      const sv = await getStrategyValidation({ ttlMs: 0 });
+      const m = sv.strategies?.[0];
+      if (m) console.log(`[strategy] ${m.id}: ${m.status} (exposure ${m.exposure_mult}, rec ${m.recommendedAction || 'none'})`);
+    } catch (e) { console.warn('[strategy] eval error:', e.message); }
   } catch (e) { console.warn('[validation] grade error:', e.message); }
 }
 

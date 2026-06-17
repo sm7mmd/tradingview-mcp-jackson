@@ -35,7 +35,7 @@ export function decide(currentState, ev, cfg = CFG) {
     } else if (ev.roll18Mean != null && ev.roll18Mean < 0) {
       state = 'retired'; actor = 'auto'; reason = `rolling-${cfg.RETIRE_WINDOW} excess ${pc(ev.roll18Mean)} < 0 (sustained)`;
     } else if (currentState === 'promoted' &&
-      (ev.rollMean < 0 || (ev.rollT != null && ev.rollT < cfg.DECAY_ROLL_T) || ev.currentDD < cfg.DECAY_DD)) {
+      ((ev.rollMean != null && ev.rollMean < 0) || (ev.rollT != null && ev.rollT < cfg.DECAY_ROLL_T) || ev.currentDD < cfg.DECAY_DD)) {
       state = 'decaying'; actor = 'auto';
       reason = `rolling-${cfg.ROLL_WINDOW} weakening (mean ${pc(ev.rollMean)}, t ${ev.rollT}, DD ${pc(ev.currentDD)})`;
     }
