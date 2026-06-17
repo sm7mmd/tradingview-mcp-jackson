@@ -13,7 +13,26 @@ import { db } from './db.js';
 
 export const HORIZONS = [5, 10, 20];
 export const HEADLINE_HORIZON = 20;
-export const COST_RT = 0.0031 + 0.0030; // commission + spread/slippage, round-trip
+// Derayah real round-trip = ~0.11% (regulatory fees only, no commission). Env-overridable.
+export const COST_RT = +process.env.COST_RT || 0.0011;
+
+// Lifecycle status per signal family. Until the state machine (P2) automates this, it's a
+// seed: every per-signal family is EXPERIMENTAL (no proven edge — the 9-pt score family
+// tested t=0.74, the opportunity engine is score-derived). Validated edges live as
+// STRATEGIES (strategy_validation.mjs), not per-signal rows. Nothing here is "promoted".
+export const FAMILY_STATUS = {
+  STRONG_BUY: 'retired',            // 9-pt score — definitively dead (portfolio t=0.74)
+  STRONG_BUY_CONFIRMED: 'experimental',
+  SCORE_TRAJECTORY: 'experimental',
+  PRE_BREAKOUT_COIL: 'experimental',
+  STEALTH_RS_LEADER: 'experimental',
+  VOLATILITY_EXPANSION: 'experimental',
+  DIVERGENCE_REVERSAL: 'experimental',
+  SMART_MONEY_ACCUMULATION: 'experimental',
+  INSIDER_TECHNICAL_SYNC: 'experimental',
+  MTF_CONFLUENCE: 'experimental',
+};
+export const familyStatus = (t) => FAMILY_STATUS[t] || 'experimental';
 
 // ── logging ────────────────────────────────────────────────────────────────
 // Insert one pending row per horizon. Idempotent via the UNIQUE constraint.
@@ -126,17 +145,18 @@ export function getValidationStats({ horizon = HEADLINE_HORIZON } = {}) {
   if (!graded.length) return { horizon, headline_horizon: HEADLINE_HORIZON, cost_rt: COST_RT, graded: 0, pending, note: 'no graded signals yet' };
 
   const indep = overlapCorrected(graded, horizon);
-  const group = (key) => {
+  const group = (key, withStatus = false) => {
     const m = {};
     for (const r of graded) { const g = r[key] || 'unknown'; (m[g] ||= []).push(r); }
-    return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, summarize(v)]));
+    return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, withStatus ? { ...summarize(v), status: familyStatus(k) } : summarize(v)]));
   };
 
   return {
     horizon, headline_horizon: HEADLINE_HORIZON, cost_rt: COST_RT, pending,
     all: summarize(graded),
     overlap_corrected: { ...summarize(indep), note: 'one signal per stock per horizon-window; t_raw here is the honest significance' },
-    by_type: group('signal_type'),
+    by_type: group('signal_type', true),
     by_regime: group('regime'),
+    note: 'Per-signal families are all EXPERIMENTAL (no proven edge). Validated edges are tracked as strategies — see /api/lab/strategy.',
   };
 }

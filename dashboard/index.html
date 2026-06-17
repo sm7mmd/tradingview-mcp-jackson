@@ -11019,7 +11019,8 @@ function renderLabPanel(d) {
     </div>
     <span style="font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap">Open Signals →</span>
   </div>`;
-  el.innerHTML = momentumPointer + `<div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
+  el.innerHTML = momentumPointer + `<div id="lab-strategy-section"></div>` + `<div id="lab-validation-section"></div>` + statsHtml + regimeNote + insightsHtml + `<div id="lab-win-rates-section"></div>` + activeHtml + completedHtml;
+  loadLabStrategy();
   loadLabValidation();
   loadLabWinRates();
 }
@@ -11111,6 +11112,44 @@ async function loadBlockDealSignal() {
 }
 
 // ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──
+// Strategy edge — graded per rebalance period (the honest unit for a portfolio strategy).
+async function loadLabStrategy() {
+  const el = document.getElementById('lab-strategy-section');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/lab/strategy').then(r => r.json());
+    if (!d.ok || !d.strategies?.length) { el.innerHTML = ''; return; }
+    const col = v => v > 0 ? 'var(--green)' : v < 0 ? '#ff5252' : 'var(--text3)';
+    const badge = s => {
+      const m = { promoted: ['var(--green)', 'PROMOTED'], candidate: ['var(--yellow)', 'CANDIDATE'], experimental: ['var(--text3)', 'EXPERIMENTAL'], retired: ['#ff5252', 'RETIRED'] }[s] || ['var(--text3)', s.toUpperCase()];
+      return `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:10px;background:${m[0]};color:#000">${m[1]}</span>`;
+    };
+    const cards = d.strategies.map(s => {
+      const yrs = Object.entries(s.yearly || {}).map(([y, v]) => `<span title="${y}: ${v.n} periods, t=${v.t}" style="font-size:10px;font-family:'JetBrains Mono',monospace;color:${col(v.excess_mean)}">${y.slice(2)} ${v.excess_mean >= 0 ? '+' : ''}${v.excess_mean}%</span>`).join('<span style="color:var(--text3)">·</span> ');
+      return `<div class="lab-insight-card" style="border-color:var(--accent)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:800;color:var(--text);cursor:help" title="Strategy Edge::This grades the whole strategy as you'd actually trade it — buy the basket, hold to the monthly rebalance, count ONE result per period. That avoids the trap where many stocks fire the same day and fake a strong signal. This is the real scorecard for momentum.">📈 Strategy Edge — ${s.name}</span>
+          ${badge(s.status)}
+          <span style="font-size:9px;color:var(--text3)">${s.periods} rebalances · ${s.span}</span>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px">${s.spec}</div>
+        <div class="lab-stats-grid" style="grid-template-columns:repeat(5,1fr)">
+          <div class="lab-stat" style="cursor:help" title="Excess per rebalance vs an equal-weight basket, net of 0.11% cost. The honest edge.">${''}<div class="lab-stat-val" style="font-size:18px;color:${col(s.excess_per_period)}">${s.excess_per_period >= 0 ? '+' : ''}${s.excess_per_period}%</div><div class="lab-stat-lbl">excess / rebalance</div></div>
+          <div class="lab-stat" style="cursor:help" title="Significance. Above 2 = unlikely to be luck. This already absorbs cross-stock clustering (one obs per period).">${''}<div class="lab-stat-val" style="font-size:18px;color:${s.t >= 2 ? 'var(--green)' : 'var(--yellow)'}">${s.t}</div><div class="lab-stat-lbl">t-stat ${s.t >= 2 ? '✓' : ''}</div></div>
+          <div class="lab-stat" style="cursor:help" title="Compounded yearly growth of the money itself (Sharia-compliant universe, after the compliance fix).">${''}<div class="lab-stat-val" style="font-size:18px;color:${col(s.cagr_abs)}">${s.cagr_abs}%</div><div class="lab-stat-lbl">~CAGR</div></div>
+          <div class="lab-stat" style="cursor:help" title="Share of rebalance periods that beat the basket.">${''}<div class="lab-stat-val" style="font-size:18px;color:var(--text)">${s.win_rate}%</div><div class="lab-stat-lbl">beat-basket</div></div>
+          <div class="lab-stat" style="cursor:help" title="Worst peak-to-trough you'd have lived through. Size for this.">${''}<div class="lab-stat-val" style="font-size:18px;color:#ff5252">${s.maxDD}%</div><div class="lab-stat-lbl">worst drop</div></div>
+        </div>
+        <div class="lab-regime-strip" style="margin-top:10px;font-size:10px" title="Promotion gate::A strategy is PROMOTED only when its edge is positive, statistically real (t>2), holds across BOTH halves of history, and has enough periods (≥24). Otherwise it stays a CANDIDATE until the data earns it.">
+          <strong>${s.status === 'promoted' ? '✓ Promoted' : s.status === 'candidate' ? '◷ Candidate' : s.status}:</strong> ${s.statusWhy}. Halves t = ${s.half1_t} / ${s.half2_t}.
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:8px;line-height:1.5">Per-year excess (develops over time): ${yrs}</div>
+      </div>`;
+    }).join('');
+    el.innerHTML = cards;
+  } catch(_) { el.innerHTML = ''; }
+}
+
 async function loadLabValidation() {
   const el = document.getElementById('lab-validation-section');
   if (!el) return;

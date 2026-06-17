@@ -1,0 +1,104 @@
+/**
+ * strategy_validation.mjs — grade STRATEGIES (portfolios), not isolated signals.
+ *
+ * The per-signal spine (validation.mjs) mis-measures a monthly-rebalanced strategy because
+ * many names fire on the same date (cross-sectional clustering inflates t). The honest unit
+ * for a strategy is the REBALANCE PERIOD: one observation per non-overlapping holding window.
+ * This reproduces scripts/signal_showdown.mjs live, so the Lab's strategy edge == the
+ * research number (momentum excess +1.57%/period, t≈3.6).
+ *
+ * Currently grades the one validated strategy (momentum-sharia). Equal-weight all-universe
+ * basket, Derayah 0.11% RT, COVID carved out. Cached (slow recompute) with a TTL.
+ */
+import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
+import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
+import { getShariaStatus } from './sharia.mjs';
+
+const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
+const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
+const inCovid = d => d >= COVID0 && d <= COVID1;
+const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
+const tstat = a => a.length > 1 ? mean(a) / (sd(a) / Math.sqrt(a.length)) : NaN;
+
+// Promotion gate (seed for the P2 state machine): real, significant, enough multi-regime data.
+function gradeStatus({ t, netMean, n, h1t, h2t }) {
+  if (n < 24) return { status: 'candidate', why: `only ${n} periods (<24 ≈ 2y) — not enough to promote` };
+  if (!(netMean > 0) || !(t > 2)) return { status: 'candidate', why: `net ${(netMean * 100).toFixed(2)}%/period, t=${t.toFixed(2)} — needs net>0 AND t>2` };
+  if (!(h1t > 1.5 && h2t > 1.5)) return { status: 'candidate', why: `not stable across both halves (t ${h1t?.toFixed(1)}/${h2t?.toFixed(1)})` };
+  return { status: 'promoted', why: `net>0, t=${t.toFixed(2)}>2, stable both halves, ${n} periods` };
+}
+
+let _cache = null;
+export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
+  if (_cache && Date.now() - _cache.at < ttlMs) return _cache.data;
+
+  const compliant = new Set(TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant').map(s => s.sym));
+  await warm(TASI_STOCKS.map(s => toYahooSym(s.sym)).concat('^TASI.SR'), '10y');
+
+  const data = {};
+  for (const s of TASI_STOCKS) {
+    const b = await getBars(toYahooSym(s.sym), '10y'); if (!b || b.length < MIN_HISTORY + H) continue;
+    data[s.sym] = { dates: b.map(x => iso(x.t)), c: b.map(x => x.c), v: b.map(x => x.v), idx: Object.fromEntries(b.map((x, i) => [iso(x.t), i])) };
+  }
+  const ib = await getBars('^TASI.SR', '10y');
+  const cal = ib.map(x => iso(x.t));
+  const usable = Object.keys(data);
+  const fwd = (sym, date) => { const d = data[sym]; const i = d.idx[date]; if (i == null || i + H >= d.c.length) return null; return d.c[i + H] / d.c[i] - 1; };
+  const ewC = {};
+  const ew = date => { if (date in ewC) return ewC[date]; const rs = []; for (const s of usable) { const r = fwd(s, date); if (r != null) rs.push(r); } return ewC[date] = rs.length ? mean(rs) : null; };
+
+  const periods = [];
+  for (let ci = MIN_HISTORY; ci + H < cal.length; ci += H) {
+    const date = cal[ci]; if (date < START || inCovid(date)) continue;
+    const bench = ew(date); if (bench == null) continue;
+    const rows = [];
+    for (const s of usable) {
+      if (!compliant.has(s)) continue; const d = data[s]; const i = d.idx[date];
+      if (i == null || i < 504 || i + H >= d.c.length) continue;
+      const mom6 = d.c[i - 21] / d.c[i - 126] - 1; if (!isFinite(mom6)) continue;
+      let liq = 0, n = 0; for (let k = Math.max(0, i - 59); k <= i; k++) { liq += d.c[k] * (d.v[k] || 0); n++; }
+      rows.push({ s, mom6, liq: liq / n });
+    }
+    if (rows.length < 10) continue;
+    const liquid = [...rows].sort((a, b) => b.liq - a.liq).slice(0, Math.ceil(rows.length * 0.5));
+    const picks = [...liquid].sort((a, b) => b.mom6 - a.mom6).slice(0, Math.max(5, Math.floor(liquid.length * 0.2))).map(r => r.s);
+    const rs = picks.map(s => fwd(s, date)).filter(r => r != null); if (!rs.length) continue;
+    const port = mean(rs) - COST_RT;
+    periods.push({ date, year: +date.slice(0, 4), n: picks.length, excess: port - bench, abs: port });
+  }
+
+  const ex = periods.map(p => p.excess), abs = periods.map(p => p.abs);
+  const t = tstat(ex);
+  const mid = periods.length ? periods[Math.floor(periods.length / 2)].date : null;
+  const h1 = ex.filter((_, i) => periods[i].date <= mid), h2 = ex.filter((_, i) => periods[i].date > mid);
+  // compounded abs equity → CAGR + maxDD
+  let eq = 1, pk = 1, mdd = 0; for (const r of abs) { eq *= 1 + r; pk = Math.max(pk, eq); mdd = Math.min(mdd, eq / pk - 1); }
+  const yrs = periods.length * H / 252;
+  const cagr = yrs > 0 ? Math.pow(eq, 1 / yrs) - 1 : NaN;
+  const grade = gradeStatus({ t, netMean: mean(ex), n: periods.length, h1t: tstat(h1), h2t: tstat(h2) });
+
+  // per-year excess for the developing-over-time view
+  const byYear = {};
+  for (const p of periods) (byYear[p.year] ||= []).push(p.excess);
+  const yearly = Object.fromEntries(Object.entries(byYear).map(([y, a]) => [y, { n: a.length, excess_mean: +(mean(a) * 100).toFixed(2), t: +(tstat(a) || 0).toFixed(2) }]));
+
+  const out = {
+    ok: true, asOf: cal.at(-1), cost_rt: COST_RT,
+    strategies: [{
+      id: 'momentum-sharia', name: 'Momentum (Sharia)',
+      spec: 'compliant ∩ liquid-half ∩ ≥2y · top-quintile 6-1mo momentum · monthly · equal-weight',
+      status: grade.status, statusWhy: grade.why,
+      periods: periods.length, span: periods.length ? `${periods[0].date} → ${periods.at(-1).date}` : null,
+      excess_per_period: +(mean(ex) * 100).toFixed(2), t: +(t || 0).toFixed(2),
+      win_rate: periods.length ? +(ex.filter(x => x > 0).length / periods.length * 100).toFixed(0) : 0,
+      cagr_abs: +((cagr || 0) * 100).toFixed(1), maxDD: +((mdd) * 100).toFixed(1),
+      half1_t: +(tstat(h1) || 0).toFixed(2), half2_t: +(tstat(h2) || 0).toFixed(2),
+      avg_names: periods.length ? Math.round(mean(periods.map(p => p.n))) : 0,
+      yearly,
+    }],
+    note: 'One observation per non-overlapping 20-session rebalance (cross-sectional-clustering-robust). Equal-weight basket benchmark, COVID carved out.',
+  };
+  _cache = { at: Date.now(), data: out };
+  return out;
+}

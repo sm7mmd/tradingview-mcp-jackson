@@ -25,6 +25,7 @@ import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_H
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
+import { getStrategyValidation } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
@@ -2544,6 +2545,13 @@ const server = createServer(async (req, res) => {
     try {
       return json(res, await getBlockDealSignal());
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Strategy validation — graded per rebalance period (the cross-clustering-robust unit).
+  if (path === '/api/lab/strategy' && method === 'GET') {
+    try {
+      return json(res, await getStrategyValidation());
+    } catch(e) { return json(res, { ok: false, error: e.message }, 500); }
   }
 
   // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
