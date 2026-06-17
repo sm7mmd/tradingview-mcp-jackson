@@ -2554,6 +2554,20 @@ const server = createServer(async (req, res) => {
     } catch(e) { return json(res, { ok: false, error: e.message }, 500); }
   }
 
+  // Manual promotion (user-confirmed up-transition). Re-checks the gate server-side.
+  if (path === '/api/lab/strategy/promote' && method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const id = body.id;
+      if (!id) return json(res, { ok: false, error: 'id required' }, 400);
+      const val = await getStrategyValidation();
+      const strat = (val.strategies || []).find(s => s.id === id);
+      if (!strat) return json(res, { ok: false, error: 'unknown strategy' }, 404);
+      const { promote } = await import('./strategy_state.mjs');
+      return json(res, promote(id, strat.evidence));
+    } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
+
   // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
   // Wilson confidence intervals. ?horizon=N (default 20). ?type=&score= for a single lookup.
   if (path === '/api/lab/calibration' && method === 'GET') {
