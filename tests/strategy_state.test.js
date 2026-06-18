@@ -1,10 +1,12 @@
 /**
- * Unit tests for the strategy state machine decision logic (pure, no DB).
+ * Tests for the strategy state machine: pure decision logic (no DB) +
+ * persistence wiring round-trip (promote/evaluate/getState/transitions via SQLite).
  * Run: node --experimental-sqlite --test tests/strategy_state.test.js
  */
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, gateMet, exposureFor, CFG } from '../dashboard/strategy_state.mjs';
+import { decide, gateMet, exposureFor, CFG, promote, evaluate, getState, transitions } from '../dashboard/strategy_state.mjs';
+import { db } from '../dashboard/db.js';
 
 // baseline evidence that PASSES the promotion gate
 const pass = { n: 30, t: 2.9, halfT1: 2.3, halfT2: 1.8, netMean: 0.012, rollMean: 0.012, rollT: 2.5, roll18Mean: 0.011, currentDD: -0.05 };
@@ -98,5 +100,54 @@ describe('decide — thin-data evidence (null rolling stats)', () => {
     const r = decide('promoted', { ...pass, rollMean: null, rollT: null, roll18Mean: null, currentDD: -0.31 });
     assert.equal(r.state, 'retired');
     assert.equal(r.actor, 'auto');
+  });
+});
+
+// ── Persistence wiring (DB round-trip) ──────────────────────────────────────
+// The pure tests above never exercise promote/evaluate/getState against SQLite —
+// exactly where the "Lab shows stale state after promote" class of bug lived.
+// These assert a promote/auto-decay actually persists and reads back (the data
+// half of that defect). Full API+cache e2e needs bar fixtures, out of scope here.
+describe('persistence wiring (DB round-trip)', () => {
+  const TID = '__test_strat__';
+  const wipe = () => db.exec(`DELETE FROM strategy_state WHERE strategy_id='${TID}'; DELETE FROM strategy_transitions WHERE strategy_id='${TID}';`);
+  before(wipe);
+  after(wipe);
+
+  it('unseen strategy defaults to candidate / exposure 0', () => {
+    wipe();
+    const s = getState(TID);
+    assert.equal(s.state, 'candidate');
+    assert.equal(s.exposure_mult, 0);
+  });
+
+  it('promote persists promoted/1.0 and is read back by getState', () => {
+    wipe();
+    const r = promote(TID, pass);
+    assert.equal(r.ok, true);
+    assert.equal(r.state, 'promoted');
+    const s = getState(TID);
+    assert.equal(s.state, 'promoted');
+    assert.equal(s.exposure_mult, 1.0);
+  });
+
+  it('promote with failing gate is rejected and does not persist', () => {
+    wipe();
+    const r = promote(TID, { ...pass, t: 0.5 });
+    assert.equal(r.ok, false);
+    assert.equal(getState(TID).state, 'candidate');
+  });
+
+  it('auto-decay persists and logs an auto transition', () => {
+    wipe();
+    promote(TID, pass);                                       // → promoted
+    const res = evaluate(TID, { ...pass, rollMean: -0.01, rollT: 0.5 });
+    assert.equal(res.changed, true);
+    assert.equal(res.state, 'decaying');
+    const s = getState(TID);
+    assert.equal(s.state, 'decaying');
+    assert.equal(s.exposure_mult, 0.5);
+    const log = transitions(TID, 5);
+    assert.ok(log.some(t => t.from_state === 'promoted' && t.to_state === 'decaying' && t.actor === 'auto'));
   });
 });

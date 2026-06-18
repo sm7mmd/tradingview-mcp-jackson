@@ -31,6 +31,10 @@ function gradeStatus({ t, netMean, n, h1t, h2t }) {
 }
 
 let _cache = null;
+// Drop the memoized result so the next read recomputes against current DB state.
+// Must be called after any out-of-band strategy_state mutation (e.g. manual promote),
+// otherwise the Lab API serves a pre-mutation snapshot for up to the TTL.
+export function bustCache() { _cache = null; }
 export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
   if (_cache && Date.now() - _cache.at < ttlMs) return _cache.data;
 

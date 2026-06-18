@@ -25,7 +25,7 @@ import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_H
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
-import { getStrategyValidation } from "./strategy_validation.mjs";
+import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
@@ -2571,7 +2571,9 @@ const server = createServer(async (req, res) => {
       const strat = (val.strategies || []).find(s => s.id === id);
       if (!strat) return json(res, { ok: false, error: 'unknown strategy' }, 404);
       const { promote } = await import('./strategy_state.mjs');
-      return json(res, promote(id, strat.evidence));
+      const result = promote(id, strat.evidence);
+      if (result.ok) bustStrategyCache(); // state changed → drop stale validation cache so the Lab reflects it immediately
+      return json(res, result);
     } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
   }
 
