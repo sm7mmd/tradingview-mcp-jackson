@@ -106,7 +106,9 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
     note: exposure === 0
       ? (stateMult === 0
-          ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
+          ? (seasonal.inSeason
+              ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
+              : `Strategy not live yet (candidate/retired) AND a seasonal weak month — 0% deployed. Even after promoting, sizing stays 0% until the weak month passes.`)
           : `Weak month — model says HOLD CASH (0% invested).`)
       : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`,
   };

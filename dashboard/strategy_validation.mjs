@@ -13,7 +13,7 @@
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
 import { getShariaStatus } from './sharia.mjs';
-import { evaluate, getState, transitions } from './strategy_state.mjs';
+import { evaluate, transitions } from './strategy_state.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
 const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
@@ -102,17 +102,18 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     currentDD: +(curDD).toFixed(4),
   };
 
+  // evaluate() persists any AUTO risk-down and returns the resulting state +
+  // exposure_mult + recommendedAction — no need to re-read with getState().
   const stRes = evaluate('momentum-sharia', evidence);
-  const st = getState('momentum-sharia');
   const txns = transitions('momentum-sharia', 6);
 
   // statusWhy must track the state-machine state, NOT the promotion grader — a
   // decaying/retired strategy showing a "passed the gate" rationale is misleading.
   const lastReason = txns[0]?.reason;
   const statusWhy =
-      st.state === 'promoted' ? `Live at full Scheme-D sizing — ${grade.why}.`
-    : st.state === 'decaying' ? `Risk halved (decaying)${lastReason ? ` — ${lastReason}` : ''}.`
-    : st.state === 'retired'  ? `Retired, 0% sizing${lastReason ? ` — ${lastReason}` : ''}.`
+      stRes.state === 'promoted' ? `Live at full Scheme-D sizing — ${grade.why}.`
+    : stRes.state === 'decaying' ? `Risk halved (decaying)${lastReason ? ` — ${lastReason}` : ''}.`
+    : stRes.state === 'retired'  ? `Retired, 0% sizing${lastReason ? ` — ${lastReason}` : ''}.`
     : stRes.recommendedAction === 'promote' ? `Cleared the gate (${grade.why}) — promote to deploy.`
     : grade.why;
 
@@ -126,8 +127,8 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     strategies: [{
       id: 'momentum-sharia', name: 'Momentum (Sharia)',
       spec: 'compliant ∩ liquid-half ∩ ≥2y · top-quintile 6-1mo momentum · monthly · equal-weight',
-      status: st.state, statusWhy,
-      exposure_mult: st.exposure_mult,
+      status: stRes.state, statusWhy,
+      exposure_mult: stRes.exposure_mult,
       recommendedAction: stRes.recommendedAction,
       transitions: txns.map(t => ({ from: t.from_state, to: t.to_state, actor: t.actor, reason: t.reason, at: t.at.slice(0, 10) })),
       periods: periods.length, span: periods.length ? `${periods[0].date} → ${periods.at(-1).date}` : null,
