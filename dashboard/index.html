@@ -1528,6 +1528,22 @@ main {
   color: var(--text);
 }
 
+/* Signals = the one validated-edge tab → persistent green hero accent so it
+   reads as the destination even though Screener stays the default landing tab. */
+.tab-edge { color: var(--text); }
+.tab-edge .edge-pill {
+  margin-inline-start: auto;
+  font-size: 8px; font-weight: 800; letter-spacing: .08em;
+  padding: 2px 6px; border-radius: 6px;
+  background: rgba(0,200,120,.16); color: #2ed3a0;
+  text-transform: uppercase; flex: 0 0 auto;
+}
+.tab-edge:not(.active)::after {
+  content: ''; position: absolute; top: 8px; bottom: 8px;
+  inset-inline-start: 0; width: 3px; border-radius: 0 3px 3px 0;
+  background: rgba(0,200,120,.55);
+}
+
 .tab.active {
   background: rgba(61,139,255,.13) !important;
   color: #fff !important;
@@ -3193,7 +3209,7 @@ td { padding: 10px 14px !important; }
 
   <div class="tabs">
     <button class="tab active" onclick="switchTab('screener',this)"  data-i18n="tabScreener" title="Screener::Scan all stocks in your universe and rank them by signal strength. Run a Full Scan to get the latest readings.">Screener</button>
-    <button class="tab" onclick="switchTab('momentum',this)"          id="tab-momentum"       title="Signals::The validated edges proven to beat the market on your real constraints (Sharia-compliant, low-cost Derayah). Two signals live here: the monthly Momentum buy-list (recent winners), and the Block-Deal signal (follow big premium trades, ~1-month hold).">📊 Signals</button>
+    <button class="tab tab-edge" onclick="switchTab('momentum',this)"          id="tab-momentum"       title="Signals::The validated edges proven to beat the market on your real constraints (Sharia-compliant, low-cost Derayah). Two signals live here: the monthly Momentum buy-list (recent winners), and the Block-Deal signal (follow big premium trades, ~1-month hold). This is the one tab backed by a proven edge — start here.">📊 Signals <span class="edge-pill">✓ Edge</span></button>
     <button class="tab" onclick="switchTab('markets',this)"          data-i18n="tabMarkets"  title="Markets Overview::Global market conditions at a glance — index levels, sector heat maps, and macro signals to frame the day.">🌍 Markets</button>
     <button class="tab" onclick="switchTab('positions',this)"        data-i18n="tabPositions" title="Portfolio::Track your real positions and P&amp;L, paper-trade with the virtual portfolio, and monitor block deals.">💼 Portfolio</button>
     <button class="tab" onclick="switchTab('lab',this)"              id="tab-lab"            title="Accuracy Lab::Analyze your trade history to discover which setups work best for you — by score, RSI zone, sector, and hold time.">🔬 Lab</button>
