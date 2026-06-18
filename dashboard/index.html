@@ -3438,17 +3438,17 @@ td { padding: 10px 14px !important; }
       <div class="empty-state"><div class="icon">🔬</div><p>Loading lab…</p></div>
     </div>
 
-    <!-- ── Strategy Validation (moved from Markets — shadow-trade learning loop) ── -->
-    <div class="port-section-divider" style="margin-top:18px" title="Strategy Validation::Track setups you're watching but haven't traded — &quot;shadow trades.&quot; Compare against what actually happened to learn which signals have edge in your market, without risking real money.">📊 Strategy Validation
-      <span>Track opportunities · learn what works · <button class="btn btn-secondary" onclick="loadStrategyValidation()" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button></span>
+    <!-- ── Shadow Tracks (moved from Markets — untraded-hypothesis tracker) ── -->
+    <div class="port-section-divider" style="margin-top:18px" title="Shadow Tracks::Setups you're watching but haven't traded — &quot;paper&quot; hypotheses. Compare each against what actually happened to learn which of YOUR reads hold up, without risking money. (Distinct from Strategy Edge/True Edge above, which grade the proven momentum edge on the whole universe, and from the Accuracy Lab, which grades your REAL closed trades.)">📊 Shadow Tracks
+      <span>Untraded hypotheses you're tracking · <button class="btn btn-secondary" onclick="loadStrategyValidation()" style="font-size:10px;padding:2px 8px;display:inline-flex">⟳ Refresh</button></span>
     </div>
     <div id="sv-root" style="padding:2px 0">
       <!-- Tab bar -->
       <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:10px">
         <button class="sv-tab active" onclick="svTab('tracks')" id="svt-tracks" title="Open Tracks::Shadow trades you're currently monitoring — setups you liked but didn't enter. They stay open until you close them manually or they hit a signal change.">📌 Open Tracks</button>
         <button class="sv-tab" onclick="svTab('closed')" id="svt-closed" title="Closed Tracks::Completed shadow trades with their outcome. Did the setup work? Compare your hypothesis to reality to sharpen your pattern recognition.">✅ Closed</button>
-        <button class="sv-tab" onclick="svTab('leaderboard')" id="svt-leaderboard" title="What Works::Leaderboard of your best-performing setup types — by score tier, style tag, sector, and RSI zone. Your personal edge, data-driven.">🏆 What Works</button>
-        <button class="sv-tab" onclick="svTab('insights')" id="svt-insights" title="Edge Map::Visual breakdown of which combinations of criteria produced the best outcomes in your history. Helps you refine which signals to trust most.">🔬 Edge Map</button>
+        <button class="sv-tab" onclick="svTab('leaderboard')" id="svt-leaderboard" title="Track Leaderboard::Best-performing shadow-track setup types — by score tier, style tag, sector, and RSI zone. Ranks YOUR untraded hypotheses, not real trades (that's the Accuracy Lab) and not the proven edge (that's Strategy Edge above).">🏆 Track Leaderboard</button>
+        <button class="sv-tab" onclick="svTab('insights')" id="svt-insights" title="Track Patterns::Visual breakdown of which criteria combinations produced the best shadow-track outcomes. Helps refine which of your reads to trust.">🔬 Track Patterns</button>
       </div>
       <div id="sv-panel-tracks"></div>
       <div id="sv-panel-closed" style="display:none"></div>
