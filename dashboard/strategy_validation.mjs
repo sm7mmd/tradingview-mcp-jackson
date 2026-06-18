@@ -104,6 +104,17 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
 
   const stRes = evaluate('momentum-sharia', evidence);
   const st = getState('momentum-sharia');
+  const txns = transitions('momentum-sharia', 6);
+
+  // statusWhy must track the state-machine state, NOT the promotion grader — a
+  // decaying/retired strategy showing a "passed the gate" rationale is misleading.
+  const lastReason = txns[0]?.reason;
+  const statusWhy =
+      st.state === 'promoted' ? `Live at full Scheme-D sizing — ${grade.why}.`
+    : st.state === 'decaying' ? `Risk halved (decaying)${lastReason ? ` — ${lastReason}` : ''}.`
+    : st.state === 'retired'  ? `Retired, 0% sizing${lastReason ? ` — ${lastReason}` : ''}.`
+    : stRes.recommendedAction === 'promote' ? `Cleared the gate (${grade.why}) — promote to deploy.`
+    : grade.why;
 
   // per-year excess for the developing-over-time view
   const byYear = {};
@@ -115,10 +126,10 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     strategies: [{
       id: 'momentum-sharia', name: 'Momentum (Sharia)',
       spec: 'compliant ∩ liquid-half ∩ ≥2y · top-quintile 6-1mo momentum · monthly · equal-weight',
-      status: st.state, statusWhy: grade.why,
+      status: st.state, statusWhy,
       exposure_mult: st.exposure_mult,
       recommendedAction: stRes.recommendedAction,
-      transitions: transitions('momentum-sharia', 6).map(t => ({ from: t.from_state, to: t.to_state, actor: t.actor, reason: t.reason, at: t.at.slice(0, 10) })),
+      transitions: txns.map(t => ({ from: t.from_state, to: t.to_state, actor: t.actor, reason: t.reason, at: t.at.slice(0, 10) })),
       periods: periods.length, span: periods.length ? `${periods[0].date} → ${periods.at(-1).date}` : null,
       excess_per_period: +(mean(ex) * 100).toFixed(2), t: +(t || 0).toFixed(2),
       win_rate: periods.length ? +(ex.filter(x => x > 0).length / periods.length * 100).toFixed(0) : 0,

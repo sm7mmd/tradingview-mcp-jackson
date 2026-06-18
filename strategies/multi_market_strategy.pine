@@ -85,8 +85,10 @@ price_cross_mid_down = ta.crossunder(close, ema_mid)
 bounce_long  = in_bull and price_cross_mid_up   and rsi > 45 and rsi < 65 and macd_long
 bounce_short = in_bear and price_cross_mid_down and rsi < 55 and rsi > 35 and macd_short
 
-vwap_long_ok  = not use_vwap_filter or close > monthly_vwap
-vwap_short_ok = not use_vwap_filter or close < monthly_vwap
+// na(monthly_vwap) → symbol has no volume (some indices/FX); treat as pass so the
+// filter never silently suppresses every entry on a volume-less market.
+vwap_long_ok  = not use_vwap_filter or na(monthly_vwap) or close > monthly_vwap
+vwap_short_ok = not use_vwap_filter or na(monthly_vwap) or close < monthly_vwap
 
 long_entry  = (long_cross  and in_bull and rsi_long_ok  and macd_long  and vol_ok and vwap_long_ok ) or bounce_long
 short_entry = (short_cross and in_bear and rsi_short_ok and macd_short and vol_ok and vwap_short_ok) or bounce_short
