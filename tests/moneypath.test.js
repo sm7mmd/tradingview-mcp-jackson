@@ -7,8 +7,9 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { scoreBias } from '../scripts/tasi_screener.mjs';
+import { scoreBias, computeSeasonality } from '../scripts/tasi_screener.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
+import { schemeDExposure } from '../dashboard/momentum_screen.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -118,5 +119,44 @@ describe('gradePending — forward excess vs equal-weight basket', () => {
     await gradePending({ getBars, universe: [BASK], cost: 0.001 });
     const row = db.prepare(`SELECT * FROM signal_outcomes WHERE sym=? AND horizon=5`).get(SIG);
     assert.equal(row.graded_at, null);
+  });
+});
+
+// ── schemeDExposure (pure sizing math) ──────────────────────────────────────
+describe('schemeDExposure — vol-target × seasonal × state governor', () => {
+  it('low vol caps exposure at 1.0 when promoted & in-season', () => {
+    // targetVol/realizedVol = 0.15/0.10 = 1.5 → capped to 1 → ×1
+    assert.equal(schemeDExposure({ realizedVol: 0.10, targetVol: 0.15, inSeason: true, stateMult: 1 }), 1);
+  });
+  it('high vol scales exposure down (0.15/0.30 = 0.5)', () => {
+    assert.equal(schemeDExposure({ realizedVol: 0.30, targetVol: 0.15, inSeason: true, stateMult: 1 }), 0.5);
+  });
+  it('weak month forces 0 regardless of vol/state', () => {
+    assert.equal(schemeDExposure({ realizedVol: 0.10, targetVol: 0.15, inSeason: false, stateMult: 1 }), 0);
+  });
+  it('candidate/retired (stateMult 0) forces 0', () => {
+    assert.equal(schemeDExposure({ realizedVol: 0.10, targetVol: 0.15, inSeason: true, stateMult: 0 }), 0);
+  });
+  it('decaying halves the vol-target exposure (0.5 × 0.5)', () => {
+    assert.equal(schemeDExposure({ realizedVol: 0.30, targetVol: 0.15, inSeason: true, stateMult: 0.5 }), 0.25);
+  });
+  it('null realizedVol defaults the vol term to 1 (then × state)', () => {
+    assert.equal(schemeDExposure({ realizedVol: null, targetVol: 0.15, inSeason: true, stateMult: 1 }), 1);
+  });
+});
+
+// ── computeSeasonality (per-month avg daily return %) ────────────────────────
+describe('computeSeasonality — monthly average daily return', () => {
+  it('separates a +1%/day January from a -2%/day February', () => {
+    // The return at index i is labeled by times[i]'s month, so make every
+    // Feb-timestamped step the -2% drop (incl. the Jan→Feb boundary step).
+    const day = 86400, closes = [100], times = [Date.UTC(2025, 0, 1) / 1000];
+    let t = times[0];
+    for (let i = 1; i < 15; i++) { t += day; times.push(t); closes.push(closes[i - 1] * 1.01); }   // Jan +1%/day
+    let tf = Date.UTC(2025, 1, 1) / 1000;
+    for (let i = 0; i < 15; i++) { times.push(tf); closes.push(closes[closes.length - 1] * 0.98); tf += day; } // Feb -2%/day
+    const s = computeSeasonality(closes, times);
+    assert.equal(s[1], 1);    // January = +1.00%/day
+    assert.equal(s[2], -2);   // February = -2.00%/day
   });
 });

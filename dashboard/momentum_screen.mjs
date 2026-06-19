@@ -21,6 +21,15 @@ const sd = a => { if (a.length < 2) return NaN; const m = a.reduce((x, y) => x +
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Scheme-D gross exposure: vol-target (cap 1, scale so realized vol ≈ targetVol) ×
+// seasonal sit-out (0 in a weak month) × state-machine governor (candidate/retired 0,
+// decaying 0.5, promoted 1). Pure so the money math is unit-testable.
+export function schemeDExposure({ realizedVol, targetVol = 0.15, inSeason, stateMult }) {
+  let e = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
+  if (!inSeason) e = 0;                               // weak month → sit out
+  return e * stateMult;
+}
+
 export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15 } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
@@ -92,11 +101,9 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   }
   const portDaily = Object.keys(dayRet).sort().map(t => mean(dayRet[t])).filter(isFinite);
   const realizedVol = portDaily.length >= 20 ? sd(portDaily) * Math.sqrt(252) : null;
-  let exposure = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
-  if (!seasonal.inSeason) exposure = 0;               // weak month → sit out
   // State-machine governor: candidate/retired→0, decaying→×0.5, promoted→×1.0
   const stateMult = getState('momentum-sharia').exposure_mult;
-  exposure = exposure * stateMult;
+  const exposure = schemeDExposure({ realizedVol, targetVol, inSeason: seasonal.inSeason, stateMult });
   const exposurePct = +(exposure * 100).toFixed(0);
   const sizing = {
     model: 'vol-target + seasonal sit-out (Scheme D)',
