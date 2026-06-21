@@ -16,6 +16,12 @@ import { getShariaStatus } from './sharia.mjs';
 import { evaluate, transitions } from './strategy_state.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
+// Accepted survivorship haircut: Yahoo gives listed-only names, so backtest CAGR is
+// optimistic. Bias bounded ~1-1.5%/yr on the liquid universe (most TASI exits are
+// value-preserving mergers, failures skew illiquid → filtered out). No cheap
+// survivorship-free TASI source exists (EODHD/TwelveData/FMP all checked). We DISCLOSE
+// rather than correct the series: excess-vs-basket is haircut-robust; absolute CAGR is not.
+const SURVIVORSHIP_HAIRCUT = +process.env.SURVIVORSHIP_HAIRCUT || 0.015;
 const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
 const inCovid = d => d >= COVID0 && d <= COVID1;
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
@@ -138,12 +144,14 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
       excess_per_period: +(mean(ex) * 100).toFixed(2), t: +(t || 0).toFixed(2),
       win_rate: periods.length ? +(ex.filter(x => x > 0).length / periods.length * 100).toFixed(0) : 0,
       cagr_abs: +((cagr || 0) * 100).toFixed(1), maxDD: +((mdd) * 100).toFixed(1),
+      cagr_abs_net_haircut: +(((cagr || 0) - SURVIVORSHIP_HAIRCUT) * 100).toFixed(1),
+      survivorship_haircut_pct: +(SURVIVORSHIP_HAIRCUT * 100).toFixed(1),
       half1_t: +(tstat(h1) || 0).toFixed(2), half2_t: +(tstat(h2) || 0).toFixed(2),
       avg_names: periods.length ? Math.round(mean(periods.map(p => p.n))) : 0,
       yearly,
       evidence,
     }],
-    note: 'One observation per non-overlapping 20-session rebalance (cross-sectional-clustering-robust). Equal-weight basket benchmark, COVID carved out.',
+    note: `One observation per non-overlapping 20-session rebalance (cross-sectional-clustering-robust). Equal-weight basket benchmark, COVID carved out. Absolute CAGR is survivorship-optimistic (listed-only data) — accepted ~${(SURVIVORSHIP_HAIRCUT * 100).toFixed(1)}%/yr haircut shown as cagr_abs_net_haircut; excess-vs-basket is the haircut-robust metric.`,
   };
   _cache = { at: Date.now(), data: out };
   return out;
