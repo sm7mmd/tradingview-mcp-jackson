@@ -27,6 +27,7 @@ import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
+import { json, html, readBody } from "./http_util.mjs";
 import { sendTelegram } from "./notify.mjs";
 import { getUpcomingEvents } from "./macro.mjs";
 import { fetchGoogleNews, getEarningsCalendar, newsCache, NEWS_TTL } from "./news.mjs";
@@ -980,32 +981,6 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
   })();
 
   return { ok: true, message: symbols ? `Scanning ${symbols.length} stocks` : "Scanning all stocks" };
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function json(res, data, status = 200) {
-  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(data));
-}
-
-function html(res, filePath) {
-  try {
-    const content = readFileSync(filePath, "utf8");
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(content);
-  } catch { res.writeHead(404); res.end("Not found"); }
-}
-
-function readBody(req, maxBytes = 1_000_000) {
-  return new Promise((resolve, reject) => {
-    let body = "", size = 0;
-    req.on("data", c => {
-      size += c.length;
-      if (size > maxBytes) { req.destroy(); return reject(new Error('Request body too large')); }
-      body += c;
-    });
-    req.on("end", () => { try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); } });
-  });
 }
 
 // ── Google OAuth config (set in .env) ─────────────────────────────────────────
