@@ -57,37 +57,80 @@ const isDenied = (page) => page.evaluate(() => /access denied/i.test(document.bo
 const waitRows = (page) => page.waitForFunction(
   () => /\n\d{4,5}\n[\s\S]*\d{2}\/\d{2}\/20\d\d/.test(document.body.innerText), { timeout: 15000 }).catch(() => {});
 
-// Best-effort: fill the "By Time Period" from/to date inputs and apply. Returns true if it
-// found something to fill. Heuristic across input types — the site is a jQuery DataTables page;
-// if this misses, use --pause and set the filter by hand.
+// Parse the feed's DD/MM/YYYY date cells to an ISO string for range checks.
+const ddmmyyyyToISO = (s) => { const m = /(\d{2})\/(\d{2})\/(20\d\d)/.exec(s || ''); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+
+// Verify the date filter actually took: sample the visible rows' dates and check they fall
+// inside [from, to] (with a 7-day grace for boundary rows). Returns a report the caller logs
+// so a silent miss (still showing the latest/current view) is caught BEFORE harvesting.
+async function verifyDateRange(page, fromISO, toISO) {
+  const rows = await page.evaluate(EXTRACT).catch(() => []);
+  const dates = rows.map(r => ddmmyyyyToISO(r.date)).filter(Boolean).sort();
+  if (!dates.length) return { ok: false, reason: 'no dated rows visible', sample: 0 };
+  const grace = 7 * 864e5;
+  const lo = +new Date(fromISO) - grace, hi = +new Date(toISO) + grace;
+  const inRange = dates.filter(d => { const t = +new Date(d); return t >= lo && t <= hi; }).length;
+  const frac = inRange / dates.length;
+  return { ok: frac >= 0.6, frac: +frac.toFixed(2), sample: dates.length, min: dates[0], max: dates[dates.length - 1], inRange };
+}
+
+// Best-effort: fill the "By Time Period" from/to date inputs and apply. The site is a jQuery
+// DataTables page; selectors are heuristic across input types. Hardened: wider keyword/name
+// matching, readonly + datepicker handling, multi-format (ISO + DD/MM/YYYY), broader apply
+// buttons (incl Arabic). Returns {filled, fromSet, toSet}. The caller VERIFIES with
+// verifyDateRange afterwards — if that fails, fall back to --pause and set the range by hand.
 async function setDateRange(page, fromISO, toISO) {
-  const toSite = (iso) => { const [y, m, d] = iso.split('-'); return { iso, ddmmyyyy: `${d}/${m}/${y}` }; };
+  const toSite = (iso) => { const [y, m, d] = iso.split('-'); return { iso, ddmmyyyy: `${d}/${m}/${y}`, ddmmyyyyDash: `${d}-${m}-${y}` }; };
   const f = toSite(fromISO), t = toSite(toISO);
-  const filled = await page.evaluate(({ f, t }) => {
+  const res = await page.evaluate(({ f, t }) => {
     const norm = s => (s || '').toLowerCase();
     const inputs = [...document.querySelectorAll('input')];
-    const find = (kws) => inputs.find(i => {
-      const hay = norm(i.name) + norm(i.id) + norm(i.placeholder) + norm(i.getAttribute('aria-label'));
-      return kws.some(k => hay.includes(k));
+    // Score-rank candidates by how "from/start" vs "to/end" their attributes look.
+    const attrs = i => norm(i.name) + ' ' + norm(i.id) + ' ' + norm(i.placeholder) + ' ' +
+      norm(i.getAttribute('aria-label')) + ' ' + norm(i.className);
+    const FROM_KW = ['from', 'start', 'fromdate', 'datefrom', 'date1', 'startdate', 'txtfrom', 'min', 'fdate', 'من', 'بداية'];
+    const TO_KW = ['to', 'end', 'todate', 'dateto', 'date2', 'enddate', 'txtto', 'max', 'tdate', 'إلى', 'نهاية'];
+    const find = (kws, exclude = []) => inputs.find(i => {
+      const hay = attrs(i);
+      return kws.some(k => hay.includes(k)) && !exclude.some(k => hay.includes(k));
     });
-    const setVal = (el, val) => { if (!el) return false; el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return true; };
+    // Set a value robustly: strip readonly, set, and fire the full event chain a datepicker
+    // or DataTables filter might listen for.
+    const setVal = (el, val) => {
+      if (!el) return false;
+      try { el.removeAttribute('readonly'); el.readOnly = false; } catch {}
+      el.focus();
+      el.value = val;
+      for (const type of ['input', 'keydown', 'keyup', 'change', 'blur']) el.dispatchEvent(new Event(type, { bubbles: true }));
+      return el.value === val;
+    };
     const dateInputs = inputs.filter(i => (i.type || '').toLowerCase() === 'date');
-    let okF = false, okT = false;
-    if (dateInputs.length >= 2) { okF = setVal(dateInputs[0], f.iso); okT = setVal(dateInputs[1], t.iso); }
-    else {
-      okF = setVal(find(['from', 'start', 'fromdate', 'datefrom']), f.ddmmyyyy);
-      okT = setVal(find(['to', 'end', 'todate', 'dateto']), t.ddmmyyyy);
+    let fromSet = false, toSet = false;
+    if (dateInputs.length >= 2) {
+      // Native date inputs want ISO.
+      fromSet = setVal(dateInputs[0], f.iso); toSet = setVal(dateInputs[1], t.iso);
+    } else {
+      // Text inputs: try DD/MM/YYYY first, then dashed, then ISO — whichever the field keeps.
+      const setMulti = (el, fmts) => { for (const v of fmts) if (setVal(el, v)) return true; return false; };
+      const fromEl = find(FROM_KW, TO_KW), toEl = find(TO_KW, FROM_KW);
+      fromSet = setMulti(fromEl, [f.ddmmyyyy, f.ddmmyyyyDash, f.iso]);
+      toSet = setMulti(toEl, [t.ddmmyyyy, t.ddmmyyyyDash, t.iso]);
     }
-    return okF || okT;
+    return { filled: fromSet || toSet, fromSet, toSet };
   }, { f, t });
-  if (!filled) return false;
-  // click an apply/search/go button
-  for (const sel of ['button:has-text("Search")', 'button:has-text("Apply")', 'button:has-text("Go")', 'a:has-text("Search")', 'input[type="submit"]', '#search', '.search-btn']) {
+  if (!res.filled) return res;
+  // click an apply/search/filter button — broadened, incl Arabic labels and generic submits.
+  const btnSels = ['button:has-text("Search")', 'button:has-text("Apply")', 'button:has-text("Filter")',
+    'button:has-text("Go")', 'button:has-text("Submit")', 'button:has-text("بحث")', 'button:has-text("تطبيق")',
+    'a:has-text("Search")', 'a:has-text("Apply")', 'input[type="submit"]', 'input[type="button"][value*="earch" i]',
+    '#search', '.search-btn', '.btn-search', '[onclick*="earch" i]'];
+  for (const sel of btnSels) {
     const el = page.locator(sel).first();
     if (await el.count().catch(() => 0)) { await el.click().catch(() => {}); break; }
   }
+  await page.waitForTimeout(1200);   // let the filter re-render the table
   await waitRows(page);
-  return true;
+  return res;
 }
 
 // Click the DataTables "Next" control (or common variants). Returns true if it advanced.
@@ -138,8 +181,24 @@ async function main() {
     if (await isDenied(page)) { denied(); await browser.close(); process.exit(1); }
     await waitRows(page);
     if (FROM && TO) {
-      const ok = await setDateRange(page, FROM, TO);
-      console.error(ok ? `date filter set ${FROM}→${TO} (verify in the browser)` : 'could not locate date inputs — falling back to current view; consider --pause');
+      const r = await setDateRange(page, FROM, TO);
+      if (!r.filled) {
+        console.error(`⚠ could not locate date inputs (from=${r.fromSet} to=${r.toSet}). Re-run with --pause and set the range by hand.`);
+      } else {
+        const v = await verifyDateRange(page, FROM, TO);
+        if (v.ok) {
+          console.error(`✓ date filter applied ${FROM}→${TO} — visible rows ${v.min}…${v.max} (${v.inRange}/${v.sample} in range, ${(v.frac * 100) | 0}%)`);
+        } else {
+          console.error(`⚠ date filter did NOT take — visible rows ${v.min || '?'}…${v.max || '?'} (${v.reason || (v.frac * 100 | 0) + '% in range'}).`);
+          if (!PAUSE) {
+            console.error('  This would harvest the WRONG (current) view. Re-run with --pause and set the range by hand:');
+            console.error(`  HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs --pause --pages ${PAGES}`);
+            await browser.close();
+            process.exit(2);
+          }
+          console.error('  --pause set: fix the range by hand in the browser below, then press Enter.');
+        }
+      }
     }
     if (PAUSE) {
       console.error('\n>>> Set the date range + any filters in the browser window, then press Enter here to harvest…');
