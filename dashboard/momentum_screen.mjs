@@ -30,6 +30,21 @@ export function schemeDExposure({ realizedVol, targetVol = 0.15, inSeason, state
   return e * stateMult;
 }
 
+// Plain-language sizing note. Pure so the two zero-exposure causes (weak month vs
+// not-live) and the seasonal+candidate combo are unit-testable without bars.
+export function sizingNote({ exposure, exposurePct, stateMult, inSeason, targetVol = 0.15, nHoldings = 1 }) {
+  if (exposure === 0) {
+    if (stateMult === 0) {
+      return inSeason
+        ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
+        : `Strategy not live yet (candidate/retired) AND a seasonal weak month — 0% deployed. Even after promoting, sizing stays 0% until the weak month passes.`;
+    }
+    return `Weak month — model says HOLD CASH (0% invested).`;
+  }
+  const perPos = (exposurePct / Math.max(1, nHoldings)).toFixed(1);
+  return `Put ${exposurePct}% of the account to work (≈${perPos}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`;
+}
+
 export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15 } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
@@ -111,13 +126,7 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     realizedVolPct: realizedVol ? +(realizedVol * 100).toFixed(0) : null,
     exposurePct, cashPct: 100 - exposurePct,
     perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
-    note: exposure === 0
-      ? (stateMult === 0
-          ? (seasonal.inSeason
-              ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
-              : `Strategy not live yet (candidate/retired) AND a seasonal weak month — 0% deployed. Even after promoting, sizing stays 0% until the weak month passes.`)
-          : `Weak month — model says HOLD CASH (0% invested).`)
-      : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`,
+    note: sizingNote({ exposure, exposurePct, stateMult, inSeason: seasonal.inSeason, targetVol, nHoldings: holdings.length }),
   };
 
   return {

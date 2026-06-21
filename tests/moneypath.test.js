@@ -9,7 +9,8 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { scoreBias, computeSeasonality } from '../scripts/tasi_screener.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
-import { schemeDExposure } from '../dashboard/momentum_screen.mjs';
+import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
+import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -158,5 +159,60 @@ describe('computeSeasonality — monthly average daily return', () => {
     const s = computeSeasonality(closes, times);
     assert.equal(s[1], 1);    // January = +1.00%/day
     assert.equal(s[2], -2);   // February = -2.00%/day
+  });
+});
+
+// ── buildStatusWhy (review #2 — the decaying/retired branches never rendered live) ──
+describe('buildStatusWhy — tracks state machine, not the promotion grader', () => {
+  const GW = 'net>0, t=3.6>2, stable both halves, 30 periods';
+  it('promoted reflects live + grade rationale', () => {
+    assert.equal(buildStatusWhy('promoted', GW, null, null), `Live at full Scheme-D sizing — ${GW}.`);
+  });
+  it('decaying does NOT show the gate-pass text; shows risk-halved + reason', () => {
+    const r = buildStatusWhy('decaying', GW, 'rolling-12 weakening', null);
+    assert.match(r, /Risk halved \(decaying\)/);
+    assert.match(r, /rolling-12 weakening/);
+    assert.doesNotMatch(r, /stable both halves/);   // the bug was leaking grade.why here
+  });
+  it('retired shows retired/0% + reason, not gate-pass text', () => {
+    const r = buildStatusWhy('retired', GW, 'drawdown -31% circuit-breaker', null);
+    assert.match(r, /Retired, 0% sizing/);
+    assert.match(r, /circuit-breaker/);
+    assert.doesNotMatch(r, /stable both halves/);
+  });
+  it('gate-met candidate reads "promote to deploy"', () => {
+    assert.match(buildStatusWhy('candidate', GW, null, 'promote'), /Cleared the gate.*promote to deploy/);
+  });
+  it('plain candidate falls back to grade.why', () => {
+    assert.equal(buildStatusWhy('candidate', 'only 10 periods', null, null), 'only 10 periods');
+  });
+});
+
+// ── sizingNote (review #5 — the seasonal-weak + candidate combo never rendered live) ──
+describe('sizingNote — disambiguates the two zero-exposure causes', () => {
+  it('not-live in-season → promote-to-go-live message', () => {
+    const r = sizingNote({ exposure: 0, exposurePct: 0, stateMult: 0, inSeason: true });
+    assert.match(r, /not live yet/);
+    assert.match(r, /Promote it in the Lab/);
+  });
+  it('not-live AND weak month → states both causes + "stays 0% until the weak month passes"', () => {
+    const r = sizingNote({ exposure: 0, exposurePct: 0, stateMult: 0, inSeason: false });
+    assert.match(r, /not live yet/);
+    assert.match(r, /seasonal weak month/);
+    assert.match(r, /stays 0% until the weak month passes/);
+  });
+  it('live strategy, weak month (stateMult 1) → HOLD CASH, not the not-live text', () => {
+    const r = sizingNote({ exposure: 0, exposurePct: 0, stateMult: 1, inSeason: false });
+    assert.match(r, /HOLD CASH/);
+    assert.doesNotMatch(r, /not live yet/);
+  });
+  it('deployed promoted → put-to-work, no "HALVED"', () => {
+    const r = sizingNote({ exposure: 0.6, exposurePct: 60, stateMult: 1, inSeason: true, nHoldings: 5 });
+    assert.match(r, /Put 60% of the account to work/);
+    assert.doesNotMatch(r, /HALVED/);
+  });
+  it('deployed decaying (stateMult 0.5) → notes it is HALVED', () => {
+    const r = sizingNote({ exposure: 0.3, exposurePct: 30, stateMult: 0.5, inSeason: true, nHoldings: 5 });
+    assert.match(r, /HALVED because the strategy is decaying/);
   });
 });

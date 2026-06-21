@@ -22,6 +22,17 @@ const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const tstat = a => a.length > 1 ? mean(a) / (sd(a) / Math.sqrt(a.length)) : NaN;
 
+// statusWhy must track the state-machine state, NOT the promotion grader — a
+// decaying/retired strategy showing a "passed the gate" rationale is misleading.
+// Pure so the decaying/retired/candidate branches are unit-testable without bars.
+export function buildStatusWhy(state, gradeWhy, lastReason, recommendedAction) {
+  return state === 'promoted' ? `Live at full Scheme-D sizing — ${gradeWhy}.`
+    : state === 'decaying' ? `Risk halved (decaying)${lastReason ? ` — ${lastReason}` : ''}.`
+    : state === 'retired'  ? `Retired, 0% sizing${lastReason ? ` — ${lastReason}` : ''}.`
+    : recommendedAction === 'promote' ? `Cleared the gate (${gradeWhy}) — promote to deploy.`
+    : gradeWhy;
+}
+
 // Promotion gate (seed for the P2 state machine): real, significant, enough multi-regime data.
 function gradeStatus({ t, netMean, n, h1t, h2t }) {
   if (n < 24) return { status: 'candidate', why: `only ${n} periods (<24 ≈ 2y) — not enough to promote` };
@@ -107,15 +118,7 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
   const stRes = evaluate('momentum-sharia', evidence);
   const txns = transitions('momentum-sharia', 6);
 
-  // statusWhy must track the state-machine state, NOT the promotion grader — a
-  // decaying/retired strategy showing a "passed the gate" rationale is misleading.
-  const lastReason = txns[0]?.reason;
-  const statusWhy =
-      stRes.state === 'promoted' ? `Live at full Scheme-D sizing — ${grade.why}.`
-    : stRes.state === 'decaying' ? `Risk halved (decaying)${lastReason ? ` — ${lastReason}` : ''}.`
-    : stRes.state === 'retired'  ? `Retired, 0% sizing${lastReason ? ` — ${lastReason}` : ''}.`
-    : stRes.recommendedAction === 'promote' ? `Cleared the gate (${grade.why}) — promote to deploy.`
-    : grade.why;
+  const statusWhy = buildStatusWhy(stRes.state, grade.why, txns[0]?.reason, stRes.recommendedAction);
 
   // per-year excess for the developing-over-time view
   const byYear = {};
