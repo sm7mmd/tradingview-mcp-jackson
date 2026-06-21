@@ -79,4 +79,24 @@ describe('honesty guard — no buy-advice framing of the 9-pt score', () => {
       `trend state; validated buy-list = Momentum tab):\n  ${violations.join('\n  ')}`
     );
   });
+
+  it('summary tiles + their i18n keys use trend-state labels, not Buy/Sell', () => {
+    const violations = [];
+    // The big summary tiles must not be labelled Buy/Sell — they show the dead
+    // score's trend state. Catch both the HTML fallback and the i18n values.
+    const html = readFileSync(join(ROOT, 'dashboard', 'index.html'), 'utf8');
+    const TILE_LABEL = /data-i18n="(?:strongBuy|buy|strongSell)">\s*(?:Strong )?(?:Buy|Sell)\b/g;
+    (html.match(TILE_LABEL) || []).forEach((m) => violations.push(`index.html tile label: ${m}`));
+
+    // The i18n values feeding those keys (en) must be trend-state words.
+    const i18n = readFileSync(join(ASSETS, 'app-core-01-i18n-fmt.js'), 'utf8');
+    const EN_KEYS = /strongBuy:'([^']*)', buy:'([^']*)', watch:'[^']*', scanned:'[^']*', strongSell:'([^']*)'/;
+    const m = i18n.match(EN_KEYS);
+    if (m) {
+      if (/buy/i.test(m[1])) violations.push(`i18n strongBuy = '${m[1]}' (should be trend-state)`);
+      if (/buy/i.test(m[2])) violations.push(`i18n buy = '${m[2]}' (should be trend-state)`);
+      if (/sell/i.test(m[3])) violations.push(`i18n strongSell = '${m[3]}' (should be trend-state)`);
+    }
+    assert.deepEqual(violations, [], `Summary-tile Buy/Sell labels regressed:\n  ${violations.join('\n  ')}`);
+  });
 });

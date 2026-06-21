@@ -4,7 +4,7 @@
 const TR = {
   en: {
     title:'Mawjah', scanAll:'⟳ Scan All',
-    strongBuy:'Strong Buy', buy:'Buy', watch:'Watch', scanned:'Scanned', strongSell:'Strong Sell',
+    strongBuy:'Strong Uptrend', buy:'Uptrend', watch:'Building', scanned:'Scanned', strongSell:'Strong Downtrend',
     all8:'7–8 pts', crit56:'5–6 pts', crit34:'3–4 pts', noScan:'No scan yet', allBear8:'7–8 pts bearish',
     selected:'Selected:', stocks:'stocks', scanSelected:'Scan Selected', clearSel:'Clear',
     tabScreener:'Screener', tabCriteria:'🔔 Alerts', tabUniverse:'⚙ Settings', tabPositions:'💼 Portfolio',
@@ -143,7 +143,7 @@ const TR = {
     sparkUp:'Score trending up', sparkDown:'Score trending down',
     tabMarkets:'🌍 Markets',
     mktOverviewTitle:'Global Market Overview', mktRefresh:'⟳ Refresh', mktLoading:'Loading market data (requires TradingView)…',
-    mktOpportTitle:'Top Opportunities', mktOpportSub:'Strong Buy signals from last scan', mktOpportEmpty:'Run a scan first to see opportunities.',
+    mktOpportTitle:'Strongest Trends', mktOpportSub:'Highest trend-alignment scores from last scan (descriptive, not a buy list)', mktOpportEmpty:'Run a scan first to see trend scores.',
     mktBull:'▲ Bull', mktBear:'▼ Bear', mktRange:'◆ Range',
     mktRsi:'RSI', mktVol:'ATR%', mkt20d:'20d', mkt52w:'52w',
     execTitle:'Executive Summary', execEntry:'Entry Zone', execStop:'Stop', execT1:'Target 1', execT2:'Target 2',
@@ -160,7 +160,7 @@ const TR = {
   },
   ar: {
     title:'موجة', scanAll:'⟳ مسح الكل',
-    strongBuy:'شراء قوي', buy:'شراء', watch:'مراقبة', scanned:'إجمالي المسح', strongSell:'بيع قوي',
+    strongBuy:'اتجاه صاعد قوي', buy:'اتجاه صاعد', watch:'يتشكل', scanned:'إجمالي المسح', strongSell:'اتجاه هابط قوي',
     all8:'7–8 نقطة', crit56:'5–6 نقاط', crit34:'3–4 نقاط', noScan:'لا يوجد مسح بعد', allBear8:'7–8 نقطة هبوطية',
     selected:'محدد:', stocks:'أسهم', scanSelected:'مسح المحدد', clearSel:'مسح التحديد',
     tabScreener:'الفرز', tabCriteria:'🔔 التنبيهات', tabUniverse:'⚙ الإعدادات', tabPositions:'💼 المحفظة',
@@ -275,7 +275,7 @@ const TR = {
     sparkUp:'التقييم في ارتفاع', sparkDown:'التقييم في انخفاض',
     tabMarkets:'🌍 الأسواق',
     mktOverviewTitle:'نظرة عامة على الأسواق العالمية', mktRefresh:'⟳ تحديث', mktLoading:'جارٍ تحميل بيانات السوق…',
-    mktOpportTitle:'أفضل الفرص', mktOpportSub:'إشارات الشراء القوي من آخر مسح', mktOpportEmpty:'قم بتشغيل مسح أولاً لرؤية الفرص.',
+    mktOpportTitle:'أقوى الاتجاهات', mktOpportSub:'أعلى درجات توافق الاتجاه من آخر مسح (وصفي، ليس قائمة شراء)', mktOpportEmpty:'قم بتشغيل مسح أولاً لرؤية درجات الاتجاه.',
     mktBull:'▲ صاعد', mktBear:'▼ هابط', mktRange:'◆ محايد',
     mktRsi:'RSI', mktVol:'التذبذب', mkt20d:'20 يوم', mkt52w:'52 أسبوع',
     execTitle:'الملخص التنفيذي', execEntry:'نطاق الدخول', execStop:'وقف الخسارة', execT1:'الهدف 1', execT2:'الهدف 2',
