@@ -731,6 +731,41 @@ async function loadBlockDealSignal() {
   } catch(_) { el.innerHTML = ''; }
 }
 
+async function loadContractFlowSignal() {
+  const el = document.getElementById('contractflow-content');
+  if (!el) return;
+  el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px"><div style="font-size:11px;color:var(--text3)">Loading contract-flow signal…</div></div>`;
+  try {
+    const d = await fetch('/api/lab/contractflow').then(r => r.json());
+    if (!d.success) { el.innerHTML = ''; return; }
+    const col = v => v > 0 ? 'var(--green)' : v < 0 ? '#ff5252' : 'var(--text3)';
+    const sh = s => s === 'compliant' ? '<span style="color:#2dd4bf" title="Sharia::Passes the compliance screen — verify financial ratios before buying.">✓ halal</span>' : `<span style="color:var(--yellow)" title="Sharia::Not on the compliant list (${s}). Excluded from your tradeable set.">⚠ ${s}</span>`;
+    const liq = s => s.liquid ? '<span style="color:#2dd4bf" title="Liquid::≥3M SAR/day average traded value — the validated cut was the liquid half.">● liquid</span>' : `<span style="color:var(--text3)" title="Thin::Below ~3M SAR/day — the edge was weaker on thin names.">○ thin (${s.advM}M)</span>`;
+    const rows = (d.signals || []).map(s => `<tr style="${s.liquid && s.sharia === 'compliant' ? '' : 'opacity:.6'}">
+      <td style="font-size:11px;font-weight:600;color:var(--text)" title="Govt/Vision-2030 award on ${s.awardDate}::${s.headline}">${s.name} <span style="color:var(--text3);font-weight:400">${s.code}</span></td>
+      <td style="font-size:10px;text-align:center">${liq(s)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:${col(s.sinceAwardPct)}" title="Price change since the award day.">${s.sinceAwardPct >= 0 ? '+' : ''}${s.sinceAwardPct}%</td>
+      <td style="font-size:10px;text-align:end;color:var(--text2)" title="Trading days left in the validated ~20-session (1-month) drift window.">${s.sessionsLeft}d</td>
+      <td style="font-size:10px;text-align:end">${sh(s.sharia)}</td>
+    </tr>`).join('');
+    const v = d.validated || {}, u = d.universe || {};
+    const body = !(d.signals || []).length
+      ? `<div style="font-size:10px;color:var(--text3);padding:4px 0">${d.note || 'No active government contract awards right now.'}</div>`
+      : `<div class="lab-table-wrap"><table class="lab-table">
+          <thead><tr><th>Name</th><th style="text-align:center">Liquidity</th><th style="text-align:end">Since award</th><th style="text-align:end">Window</th><th style="text-align:end">Halal</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <div style="font-size:9px;color:var(--text3);margin-top:8px">${u.privateActive || 0} private-sector awards hidden (the control — no drift). Hold each name to the end of its window, then drop it. Data as of ${d.asOf}.</div>`;
+    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent);margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:800;color:var(--text)">Contract-Flow Signal 🏗️</span>
+        <span style="font-size:10px;color:var(--text3)">follow government / Vision-2030 awards · ~1-month hold</span>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px" title="Validated edge::When a company wins a government or Vision-2030 contract, retail under-reacts to the megaproject backlog and the stock drifts up over the next month. Private-sector awards show no such drift — that's the control proving it's the government angle.">When a company wins a <strong>government / Vision-2030 contract</strong>, the stock tends to drift up over the next ~month. Validated: <strong style="color:var(--green)">${v.drift || ''}</strong>, ${v.significance || ''}. <span style="color:var(--yellow)">${v.honesty || ''}</span></div>
+      ${body}
+    </div>`;
+  } catch(_) { el.innerHTML = ''; }
+}
+
 // ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──
 // Strategy edge — graded per rebalance period (the honest unit for a portfolio strategy).
 async function loadLabStrategy() {
