@@ -27,6 +27,7 @@ import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
+import { sendTelegram } from "./notify.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -51,17 +52,6 @@ const API_KEY = process.env.DASHBOARD_API_KEY || '';
 if (!API_KEY) console.warn('[auth] DASHBOARD_API_KEY not set — dashboard is unprotected. Add it to .env to enable.');
 
 function tickerDisplay(sym) { const i = sym.indexOf(":"); return i >= 0 ? sym.slice(i + 1) : sym; }
-
-// ── Telegram ──────────────────────────────────────────────────────────────────
-async function sendTelegram(token, chatId, text) {
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-    });
-    return r.json();
-  } catch (e) { return { ok: false, description: e.message }; }
-}
 
 // ── Market Regime ─────────────────────────────────────────────────────────────
 async function getSymbolMetrics(meta) {
