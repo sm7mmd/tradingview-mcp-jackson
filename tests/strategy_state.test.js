@@ -155,6 +155,8 @@ describe('persistence wiring (DB round-trip)', () => {
 
 describe('index_events ingest', () => {
   it('ingests valid add/delete events, rejects bad rows, dedups re-runs', () => {
+    // idempotent across runs: the DB persists, so clear this test's own rows first
+    db.prepare("DELETE FROM index_events WHERE source='test'").run();
     const rows = [
       { code: '1120', action: 'add',    review: '2019-05', announce_date: '2019-05-14', effective_date: '2019-05-28', index: 'MSCI Saudi', source: 'test' },
       { code: '2222', action: 'delete', review: '2024-11', announce_date: '2024-11-06', effective_date: '2024-11-25', index: 'MSCI Saudi', source: 'test' },
