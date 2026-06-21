@@ -15,7 +15,7 @@
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
 import { getShariaStatus } from './sharia.mjs';
-import { getState } from './strategy_state.mjs';
+import { getState, transitions } from './strategy_state.mjs';
 
 const sd = a => { if (a.length < 2) return NaN; const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
@@ -149,7 +149,26 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     exposurePct, cashPct: 100 - exposurePct,
     perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
     note: sizingNote({ exposure, exposurePct, stateMult, inSeason: seasonal.inSeason, targetVol, nHoldings: holdings.length }),
+    breakdown: {
+      targetVolPct: +(targetVol * 100).toFixed(0),
+      realizedVolPct: realizedVol ? +(realizedVol * 100).toFixed(0) : null,
+      volTargetRaw: realizedVol && realizedVol > 0 ? +Math.min(1, targetVol / realizedVol).toFixed(2) : 1,
+      seasonalMult: seasonal.inSeason ? 1 : 0,
+      stateMult,
+      finalExposurePct: exposurePct,
+    },
   };
+
+  const turnover = computeTurnover(holdings.map(h => h.sym), heldSyms);
+  const nameOf = (sym) => (TASI_STOCKS.find(s => s.sym === sym)?.name) || sym.replace('TADAWUL:', '');
+  const turnoverNamed = {
+    buy: turnover.buy.map(sym => holdings.find(h => h.sym === sym)),
+    hold: turnover.hold.map(sym => holdings.find(h => h.sym === sym)),
+    sell: turnover.sell.map(sym => ({ sym, name: nameOf(sym) })),
+  };
+
+  const st = getState('momentum-sharia');
+  const strategyState = { status: st.state, exposure_mult: st.exposure_mult, reason: transitions('momentum-sharia', 1)[0]?.reason || null };
 
   return {
     success: true, asOf, nextRebalance,
@@ -158,6 +177,8 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     validated: { excessPerYr: '+10 to +15%/yr', absCagr: '15–25%/yr', nwT: '2.6–3.2', maxDD: '~−26% (better than basket)', caveat: 'OOS-stable; survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
     seasonal,
     sizing,
+    turnover: turnoverNamed,
+    state: strategyState,
     holdings,
   };
 }

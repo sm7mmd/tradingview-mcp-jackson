@@ -2238,7 +2238,7 @@ const server = createServer(async (req, res) => {
   // ≥2y-listed, top-quintile 6-1 momentum). Returns current picks, not a backtest.
   if (path === '/api/lab/momentum' && method === 'GET') {
     try {
-      return json(res, await getMomentumScreen());
+      return json(res, await getMomentumScreen({ heldSyms: Object.keys(state.positions || {}) }));
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
   }
 
