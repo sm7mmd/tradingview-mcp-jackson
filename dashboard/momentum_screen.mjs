@@ -45,7 +45,29 @@ export function sizingNote({ exposure, exposurePct, stateMult, inSeason, targetV
   return `Put ${exposurePct}% of the account to work (≈${perPos}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`;
 }
 
-export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15 } = {}) {
+/**
+ * Monthly turnover vs the user's actual holdings (basis A).
+ *   buy  = picks not currently held   hold = picks held   sell = held but no longer a pick
+ * Operates on `TADAWUL:${code}` strings; preserves pickSyms order for buy/hold.
+ */
+export function computeTurnover(pickSyms, heldSyms) {
+  const held = new Set(heldSyms || []);
+  const picks = new Set(pickSyms || []);
+  const buy = (pickSyms || []).filter(s => !held.has(s));
+  const hold = (pickSyms || []).filter(s => held.has(s));
+  const sell = (heldSyms || []).filter(s => !picks.has(s));
+  return { buy, hold, sell };
+}
+
+/** SAR per name from account size × deployed fraction, whole-SAR rounded. nHoldings 0 → all cash. */
+export function sarPerName({ accountSize = 0, exposurePct = 0, nHoldings = 0 } = {}) {
+  const deployFrac = (exposurePct || 0) / 100;
+  const perName = nHoldings > 0 ? Math.round(accountSize * deployFrac / nHoldings) : 0;
+  const totalDeployed = perName * nHoldings;
+  return { perName, totalDeployed, cash: Math.round(accountSize) - totalDeployed };
+}
+
+export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15, heldSyms = [] } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
   await warm(ysyms, '10y');                       // cache-aware; refetches only if stale

@@ -13,7 +13,7 @@ import { tickerDisplay, resolveSignalLabel, computeVelocity, sectorOf, getCritPa
 import { getUpcomingEvents } from '../dashboard/macro.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
-import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
+import { schemeDExposure, sizingNote, computeTurnover, sarPerName } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
 import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
@@ -621,5 +621,37 @@ describe('contract_flow helpers', () => {
     assert.equal(isContractHeadline('Wajd Life Trading Co. Announces Project Award with Majmaah University'), true);
     assert.equal(isContractHeadline('Atlas Elevators announces its Annual Financial results for the period ending'), false);
     assert.equal(isContractHeadline("Almuneef Company Announces the Board's Recommendation to Increase Capital"), false);
+  });
+});
+
+// ── momentum decision helpers (pure) ──────────────────────────────────────────
+describe('momentum decision helpers', () => {
+  it('partitions buy/hold/sell against held positions', () => {
+    const picks = ['TADAWUL:1120', 'TADAWUL:2222', 'TADAWUL:7203'];
+    const held = ['TADAWUL:2222', 'TADAWUL:9999']; // hold 2222, own 9999 (no longer a pick)
+    const t = computeTurnover(picks, held);
+    assert.deepEqual(t.buy, ['TADAWUL:1120', 'TADAWUL:7203']);
+    assert.deepEqual(t.hold, ['TADAWUL:2222']);
+    assert.deepEqual(t.sell, ['TADAWUL:9999']);
+  });
+  it('empty held → everything is a buy, nothing to sell', () => {
+    const t = computeTurnover(['TADAWUL:1120', 'TADAWUL:2222'], []);
+    assert.deepEqual(t.buy, ['TADAWUL:1120', 'TADAWUL:2222']);
+    assert.deepEqual(t.hold, []);
+    assert.deepEqual(t.sell, []);
+  });
+  it('preserves pick order in buy/hold and handles empty picks', () => {
+    assert.deepEqual(computeTurnover([], ['TADAWUL:1120']).sell, ['TADAWUL:1120']);
+    assert.deepEqual(computeTurnover([], []), { buy: [], hold: [], sell: [] });
+  });
+  it('sarPerName splits the deployed fraction across holdings', () => {
+    const r = sarPerName({ accountSize: 100000, exposurePct: 80, nHoldings: 4 });
+    assert.equal(r.perName, 20000);
+    assert.equal(r.totalDeployed, 80000);
+    assert.equal(r.cash, 20000);
+  });
+  it('sarPerName handles 0 holdings and 0 exposure', () => {
+    assert.deepEqual(sarPerName({ accountSize: 100000, exposurePct: 80, nHoldings: 0 }), { perName: 0, totalDeployed: 0, cash: 100000 });
+    assert.deepEqual(sarPerName({ accountSize: 50000, exposurePct: 0, nHoldings: 5 }), { perName: 0, totalDeployed: 0, cash: 50000 });
   });
 });
