@@ -17,6 +17,7 @@ import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
 import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
+import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -599,5 +600,26 @@ describe('pead helpers', () => {
   it('mean averages a numeric array, NaN on empty', () => {
     assert.equal(peadMean([2, 4, 6]), 4);
     assert.ok(Number.isNaN(peadMean([])));
+  });
+});
+
+// ── contract_flow helpers (pure) ──────────────────────────────────────────────
+describe('contract_flow helpers', () => {
+  it('classifyCounterparty tags government/SOE/Vision-2030 counterparties', () => {
+    assert.equal(classifyCounterparty('Arabian Pipes Co. Announces Contracts Sign Off with Saudi Aramco'), 'govt');
+    assert.equal(classifyCounterparty('Itmam Consultancy Co. Announces Project Award with Riyadh Region Municipality'), 'govt');
+    assert.equal(classifyCounterparty('SRMG announces the award of a contract by the Ministry of Culture'), 'govt');
+    assert.equal(classifyCounterparty('Anmat Technology received a purchase order from Saudi Electricity Company'), 'govt');
+    assert.equal(classifyCounterparty('Co. announces a contract with NEOM Company'), 'govt');
+  });
+  it('classifyCounterparty tags private counterparties as private', () => {
+    assert.equal(classifyCounterparty('Group Five Pipe Saudi Co. Announces Contract Sign Off with Esnad Al Turuq Contracting Company'), 'private');
+    assert.equal(classifyCounterparty('Saudi Parts Center Co. Announces receipt of a purchase order from Al-Khorayef Industries'), 'private');
+  });
+  it('isContractHeadline keeps real awards, drops misfiled rows', () => {
+    assert.equal(isContractHeadline('Arabian Pipes Co. Announces Contracts Sign Off with Saudi Aramco'), true);
+    assert.equal(isContractHeadline('Wajd Life Trading Co. Announces Project Award with Majmaah University'), true);
+    assert.equal(isContractHeadline('Atlas Elevators announces its Annual Financial results for the period ending'), false);
+    assert.equal(isContractHeadline("Almuneef Company Announces the Board's Recommendation to Increase Capital"), false);
   });
 });
