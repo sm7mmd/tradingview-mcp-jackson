@@ -21,7 +21,7 @@ import { schemeDExposure } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
-const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
+const START = process.env.START || '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
 const VOLWIN = 60; // trailing sessions used to estimate realized vol (point-in-time)
 const inCovid = d => d >= COVID0 && d <= COVID1;
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;

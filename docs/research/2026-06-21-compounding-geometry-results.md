@@ -76,6 +76,35 @@ carrying forward, as a *defensive* overlay, but only after it survives a harder 
 out-of-sample split killed three of them. This is exactly the red-team discipline working —
 ambition in the hypothesis, ruthlessness in what we trust.
 
+## WALK-FORWARD UPDATE (2026-06-21) — brake DOWNGRADED to "insurance, not edge"
+
+Ran `scripts/compounding_geometry_walkforward.mjs`: 11 rolling 24-period windows + continuous
+per-year attribution. It overturns the conditional-keep above.
+
+```
+(A) ROLLING WINDOWS — brake vs equal-weight
+  CAGR:  brake wins 3/11 (27%), median Δ 0.0%
+  maxDD: brake shallower 3/11 (27%), not-worse 11/11, median Δ 0.0%
+  (brake COSTS CAGR -3.8%..-9.1% in trending windows 2020-24; HELPS +1.6%..+4.3% in
+   choppy/down windows 2024-26. DD help only in deep-drawdown windows: -28.6%→-22.6%.)
+
+(B) PER-YEAR (continuous path)
+  2022 brake -4.5% (whipsaw) | 2023 brake -14.6% (whipsaw, +65.7% year) | 2024 flat
+  2025 brake +6.4% (DEFENDED, -25.5% crash year) | 2026 brake -5.2% (whipsaw)
+  FULL: CAGR base 12.5% → brake 10.3% (Δ -2.2%); maxDD -28.6% → -22.6% (Δ +6.1pt)
+```
+
+**Finding:** the brake earns its keep in exactly ONE year of seven — the 2025 crash. Every
+other year it does nothing or costs return (worst: 2023, gave up 14.6pt of a +65.7% year by
+pulling back after dips and missing the rebound). **The single-split "brake wins both axes"
+result was cut-point luck** — that split put the brake's one good year (2025) in the OOS half
+and its costly year (2023) in the IS half. Walk-forward averaged the luck out.
+
+**Revised verdict — L3 drawdown brake: KILL as a return tool.** It is INSURANCE: pay ~2.2%/yr
+CAGR to cut the worst crash −28%→−22% (DD help is real and never-worse across all 11 windows).
+Not free money, not a return edge. Keep ONLY as an explicit risk-preference choice. **All three
+sizing levers now killed; the momentum return engine stays plain equal-weight.**
+
 ## What to test next (if the brake is pursued)
 
 1. **Walk-forward across multiple regimes** (deferred in this plan) — re-test the brake on
