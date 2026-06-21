@@ -26,9 +26,12 @@ const QUIET = has('--quiet') || JSON_OUT;   // db.js logs "[db] migrated…" at 
 // --held "1120,2222" → what-if HOLD/SELL preview without logging positions in the DB first.
 // Normalizes bare 4-digit codes to TADAWUL:xxxx (same rule as the Lab's addPosition). When
 // given, it REPLACES the DB positions for this run.
-const HELD = (arg('--held') || '')
-  .split(',').map(s => s.trim()).filter(Boolean)
-  .map(s => /^\d{4}$/.test(s) ? `TADAWUL:${s}` : s);
+export function normalizeHeld(raw) {
+  return (raw || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+    .map(s => /^\d{4}$/.test(s) ? `TADAWUL:${s}` : s);
+}
+const HELD = normalizeHeld(arg('--held'));
 
 // Dynamic import so we can mute the db boot log (it fires during module init, before any of
 // our code would otherwise run — imported modules execute before a static importer's body).
@@ -134,4 +137,8 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((e) => { console.error('FATAL', e.message); process.exit(1); });
+// Run only when executed directly (not when imported by tests for the pure helpers).
+import { pathToFileURL } from 'node:url';
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => { console.error('FATAL', e.message); process.exit(1); });
+}

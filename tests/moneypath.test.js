@@ -13,6 +13,7 @@ import { tickerDisplay, resolveSignalLabel, computeVelocity, sectorOf, getCritPa
 import { getUpcomingEvents } from '../dashboard/macro.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
+import { normalizeHeld } from '../scripts/decision.mjs';
 import { schemeDExposure, sizingNote, computeTurnover, sarPerName } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
@@ -653,5 +654,24 @@ describe('momentum decision helpers', () => {
   it('sarPerName handles 0 holdings and 0 exposure', () => {
     assert.deepEqual(sarPerName({ accountSize: 100000, exposurePct: 80, nHoldings: 0 }), { perName: 0, totalDeployed: 0, cash: 100000 });
     assert.deepEqual(sarPerName({ accountSize: 50000, exposurePct: 0, nHoldings: 5 }), { perName: 0, totalDeployed: 0, cash: 50000 });
+  });
+});
+
+describe('decision --held normalization', () => {
+  it('prefixes bare 4-digit codes to TADAWUL:xxxx', () => {
+    assert.deepEqual(normalizeHeld('1120,2222'), ['TADAWUL:1120', 'TADAWUL:2222']);
+  });
+  it('passes through already-prefixed symbols unchanged', () => {
+    assert.deepEqual(normalizeHeld('TADAWUL:1120,2222'), ['TADAWUL:1120', 'TADAWUL:2222']);
+  });
+  it('trims whitespace and drops empty entries', () => {
+    assert.deepEqual(normalizeHeld(' 1120 , , 2222 ,'), ['TADAWUL:1120', 'TADAWUL:2222']);
+  });
+  it('leaves non-4-digit tokens (5-digit, non-numeric) as-is', () => {
+    assert.deepEqual(normalizeHeld('12340,AAPL'), ['12340', 'AAPL']);
+  });
+  it('returns [] for empty / null input', () => {
+    assert.deepEqual(normalizeHeld(''), []);
+    assert.deepEqual(normalizeHeld(null), []);
   });
 });
