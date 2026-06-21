@@ -5684,10 +5684,6 @@ async function loadMacroPanel(force=false) {
 }
 
 // ── Whale Watch ──────────────────────────────────────────────────────────────
-async function loadWhaleTab(force=false) {
-  await loadBlockDeals(force);
-}
-
 async function loadSectorBreadth(){
   const el=document.getElementById('sector-breadth-panel');
   if(!el) return;
@@ -6120,8 +6116,7 @@ async function refreshCMAFilings() {
   }
 }
 
-// Called from loadWhaleTab — now also loads CMA filings
-const _origLoadWhaleTab = loadWhaleTab;
+// Whale tab loads block deals + CMA filings.
 async function loadWhaleTab(force=false) {
   await loadBlockDeals(force);
   await loadCMAFilings(force);
