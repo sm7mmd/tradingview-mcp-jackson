@@ -695,7 +695,7 @@ async function loadMomentumScreen() {
   } catch(_) { el.innerHTML = `<div class="lab-insight-card"><div style="font-size:10px;color:var(--text3)">Momentum screen failed to load.</div></div>`; }
 }
 
-// ── Block-Deal Signal: validated "follow big premium trades, ~1-month hold" watch-list ──
+// ── Block-Deal Watch: EXPERIMENTAL — fails the per-period gate (t 1.94), underpowered ~1y ──
 async function loadBlockDealSignal() {
   const el = document.getElementById('blockdeal-content');
   if (!el) return;
@@ -713,19 +713,19 @@ async function loadBlockDealSignal() {
       <td style="font-size:10px;text-align:end;color:var(--text2)" title="Trading days left in the validated ~20-session (1-month) hold window.">${s.sessionsLeft}d</td>
       <td style="font-size:10px;text-align:end">${sh(s.sharia)}</td>
     </tr>`).join('');
-    const v = d.validated || {}, u = d.universe || {};
+    const st = d.status || {}, u = d.universe || {};
     const body = !(d.signals || []).length
       ? `<div style="font-size:10px;color:var(--text3);padding:4px 0">${d.note || 'No active big-premium block deals right now.'}</div>`
       : `<div class="lab-table-wrap"><table class="lab-table">
           <thead><tr><th>Name</th><th style="text-align:center">Sign</th><th style="text-align:end">Premium</th><th style="text-align:end">Since deal</th><th style="text-align:end">Window</th><th style="text-align:end">Halal</th></tr></thead>
           <tbody>${rows}</tbody></table></div>
-        <div style="font-size:9px;color:var(--text3);margin-top:8px">${u.skippedDiscount || 0} discount deals skipped (sellers — they lose money). Hold each name to the end of its window, then drop it. Data as of ${d.asOf}.</div>`;
-    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent);margin-top:12px">
+        <div style="font-size:9px;color:var(--text3);margin-top:8px">${u.skippedDiscount || 0} discount deals skipped (informed sellers). Data as of ${d.asOf}.</div>`;
+    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--yellow);margin-top:12px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-        <span style="font-size:12px;font-weight:800;color:var(--text)">Block-Deal Signal 🐋</span>
-        <span style="font-size:10px;color:var(--text3)">follow big premium trades · ~1-month hold · skip discounts</span>
+        <span style="font-size:12px;font-weight:800;color:var(--text)">Block-Deal Watch 🐋</span>
+        <span style="font-size:10px;color:var(--yellow);font-weight:700">EXPERIMENTAL · not a validated edge</span>
       </div>
-      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px" title="Validated edge::A big trade (block deal) printed at or above market price means an aggressive buyer is building a position. Buying alongside and holding ~1 month made money in testing. A big trade at a discount is a motivated seller — it beats the average but loses money, so we skip it.">When a <strong>large trade</strong> prints <strong>at or above</strong> the market price (a buyer paying up), the stock tends to make money over the next ~month. Validated: <strong style="color:var(--green)">${v.absReturn || ''}</strong>, excess ${v.excess || ''}. <span style="color:var(--yellow)">${v.discountWarning || ''}</span></div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px" title="Status::Big trades at/above market (aggressive buyers) drift up modestly over ~1 month in the data, but this does NOT clear the per-period significance gate (t 1.94 < 2) and rests on only ~1 year of deal history. Shown for awareness — do not size on it.">Big trades printing <strong>at or above</strong> market are a possible accumulation tell, but <strong style="color:var(--yellow)">this fails the significance gate (t 1.94 &lt; 2)</strong> and is underpowered (~1y of data). ${st.effect || ''}. <span style="color:var(--text3)">Awareness only — not a tradeable edge.</span></div>
       ${body}
     </div>`;
   } catch(_) { el.innerHTML = ''; }

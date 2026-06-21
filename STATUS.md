@@ -35,7 +35,11 @@ Initially looked like a 2nd edge: after cracking the saudiexchange.sa harvest (J
 
 ## Decision view (shipped)
 
-The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date → **Block-Deal Signal 🐋** card. Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
+The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date → **Block-Deal Watch 🐋** card (relabeled EXPERIMENTAL — see below). Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
+
+### Block-deals — DOWNGRADED to experimental (2026-06-21)
+
+Was logged as a "validated 2nd edge" (modest), but that rested on an overlap-corrected oc-t ~1.9 — already below t>2. Audited through the event-level `portfolioGuillotine` (enter at deal, hold 20, excess vs equal-weight basket, one obs per non-overlapping bucket): BIG premium/at-market +1.54%/bucket, **t 1.94 < 2 → FAILS the gate**. Unlike contract-flow (well-powered, t 0.90 = dead), block-deals is **underpowered** (only ~1y of deal history → 14 buckets) and just under the bar — marginal/suggestive, not refuted. Dashboard card relabeled "Block-Deal Watch — EXPERIMENTAL, not a validated edge"; kept for awareness, not sizing. Resolve by re-harvesting Argaam past ~30 buckets. Test: `scripts/blockdeal_guillotine_test.mjs`.
 
 **CLI: `npm run decision`** — the same monthly call without the dashboard server. Prints state → sizing → account split → next rebalance → BUY/HOLD/SELL with live prices, momentum, ~share counts, and ⚠ debt-≥50% flags. Flags:
 - `--acct N` — account size for SAR sizing (default 100k)

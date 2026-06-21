@@ -79,17 +79,16 @@ export async function getBlockDealSignal() {
       trigger: 'big block deal ≥10M SAR at premium / at-market price', hold: '~20 sessions (1 month)',
       skip: 'discount deals (informed sellers — they lose money)', cost: '0.11% RT (Derayah)', universe: 'Sharia-compliant preferred',
     },
-    validated: {
-      absReturn: '+1.48%/deal net (20-session, premium+at-market BIG)',
-      excess: '+2.29% vs basket (t=3.98; +1.96% t=2.52 overlap-corrected)',
-      atMarket: 'at-market is the strongest sign — 75% win, oc-t 2.29 (not a fluke)',
-      premiumMagnitude: 'small premiums (0.1–0.5%) are cleanest; big premiums add nothing',
-      shariaSubset: 'tradeable (compliant) subset: +1.74%/deal excess, oc-t 1.9 — real but modest',
-      discountWarning: 'discount deals beat the basket but LOSE money (−0.37% net) — skipped',
-      regimes: 'held in calm 2025 + stressed 2026',
+    status: {
+      verdict: 'MARGINAL / UNCONFIRMED — fails the per-period gate (t 1.94 < 2)',
+      effect: 'BIG premium/at-market event excess +1.54%/bucket — positive but not significant',
+      power: 'underpowered: only ~1y of deal history → 14 non-overlapping buckets',
+      caveat: 'the original "validated" oc-t 1.9 ≈ the gate t 1.94 — it was always marginally below t>2',
+      discountWarning: 'discount deals look worse (informed sellers) — still skipped',
+      next: 're-harvest Argaam to push past ~30 buckets; that\'s the only way to settle it',
     },
     universe: { bigDeals: events.length, active: uniq.length, skippedDiscount: skipped.length },
     signals: uniq, skipped,
-    note: 'Modest, event-driven edge. Confirm the deal is real before acting; honest caveats — heuristic deal-price tag, ~50-name coverage, survivorship.',
+    note: 'NOT a validated edge — fails the cross-clustering-robust gate (t 1.94), underpowered (~1y). Suggestive only; shown for awareness, do not size on it. Heuristic deal-price tag, ~50-name coverage, survivorship.',
   };
 }
