@@ -9,6 +9,7 @@
  *   npm run decision                 # default account SAR 100,000
  *   npm run decision -- --acct 250000
  *   DECISION_ACCT=50000 npm run decision
+ *   npm run decision -- --json       # machine-readable (alerts/cron); JSON is the LAST stdout line
  *
  * Note: prices/picks are point-in-time. Re-run on the rebalance morning before trading —
  * the list can shift. Debt/cash ratios shown are indicative; confirm AAOIFI per name.
@@ -18,7 +19,9 @@ import { positions as dbPositions } from '../dashboard/db.js';
 import { getMomentumScreen, sarPerName } from '../dashboard/momentum_screen.mjs';
 
 const arg = (flag) => { const i = process.argv.indexOf(flag); return i > -1 ? process.argv[i + 1] : null; };
+const has = (flag) => process.argv.includes(flag);
 const ACCT = +(arg('--acct') || process.env.DECISION_ACCT || 100000);
+const JSON_OUT = has('--json');
 const fmtSar = (n) => 'SAR ' + Math.round(n).toLocaleString('en-US');
 const pct = (n) => (n >= 0 ? '+' : '') + (+n).toFixed(1) + '%';
 // Pull "debt NN%" out of the indicative Sharia note so we can flag near-threshold names.
@@ -41,6 +44,29 @@ async function main() {
   const exposurePct = r.sizing?.breakdown?.finalExposurePct ?? 0;
   const nHold = r.holdings.length;
   const sar = sarPerName({ accountSize: ACCT, exposurePct, nHoldings: nHold });
+
+  // Machine-readable: stable shape for alerts/cron. Adds per-name share counts on top of
+  // the raw screen payload; no terminal formatting.
+  if (JSON_OUT) {
+    const withShares = (items) => items.map((h) => ({
+      ...h, shares: h.price > 0 ? Math.floor(sar.perName / h.price) : 0,
+    }));
+    console.log(JSON.stringify({
+      asOf: r.asOf,
+      nextRebalance: r.nextRebalance,
+      state: r.state,
+      sizing: { exposurePct, cashPct: 100 - exposurePct, breakdown: r.sizing?.breakdown, seasonal: r.seasonal },
+      account: { size: ACCT, deploy: sar.totalDeployed, perName: sar.perName, cash: sar.cash },
+      turnover: {
+        buy: withShares(r.turnover?.buy || []),
+        hold: withShares(r.turnover?.hold || []),
+        sell: r.turnover?.sell || [],
+      },
+      holdings: r.holdings,
+      validated: r.validated,
+    }));
+    process.exit(0);
+  }
 
   const line = '─'.repeat(78);
   console.log('\n' + line);
