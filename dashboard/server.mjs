@@ -1849,6 +1849,18 @@ const server = createServer(async (req, res) => {
     } catch (err) { return json(res, { success: false, error: err.message }, 500); }
   }
 
+  // Serve dashboard static assets (css/js split out of index.html)
+  if (path.startsWith("/assets/") && method === "GET") {
+    const filename = path.slice("/assets/".length).replace(/[^a-zA-Z0-9._-]/g, ""); // strip path-traversal
+    const ext = filename.slice(filename.lastIndexOf("."));
+    const TYPES = { ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
+    if (!TYPES[ext]) { res.writeHead(404); return res.end("Not found"); }
+    const fp = join(__dirname, "assets", filename);
+    if (!existsSync(fp)) { res.writeHead(404); return res.end("Not found"); }
+    res.writeHead(200, { "Content-Type": TYPES[ext], "Cache-Control": "no-cache" });
+    return res.end(readFileSync(fp));
+  }
+
   // Serve screenshot files
   if (path.startsWith("/screenshots/") && method === "GET") {
     const filename = path.slice("/screenshots/".length).replace(/[^a-zA-Z0-9._-]/g, "");
