@@ -21,6 +21,16 @@
  *
  * IMPORTANT — Tadawul is behind Akamai. HEADLESS chromium gets "Access Denied"; run HEADED
  * (HEADLESS=false, needs a display). For server automation use Firecrawl stealth instead.
+ *
+ * RECAPTCHA — the announcements table loads via a reCAPTCHA-gated search (window fn
+ * `..._getAnnouncementList`). Automated clicks/calls trip the challenge and return nothing;
+ * a real human clicking Search usually passes the invisible check silently. So the reliable
+ * path on this page is --pause: YOU pick a period (5Y preset = ~5 years) / set From–To, click
+ * Search, solve any captcha, wait for the table, then press Enter and the script harvests +
+ * paginates the loaded result set. The auto --from/--to fill is best-effort and will abort
+ * (exit 2) if verifyDateRange confirms the filter didn't take.
+ * Real selectors (verified 2026-06-21): #fromDate (name=start) / #toDate (name=end) bootstrap
+ * input-daterange; period presets are buttons id="1D|1W|1M|1Y|5Y".
  * Requires: playwright (devDependencies).
  */
 import { chromium } from 'playwright';
@@ -201,8 +211,19 @@ async function main() {
       }
     }
     if (PAUSE) {
-      console.error('\n>>> Set the date range + any filters in the browser window, then press Enter here to harvest…');
+      console.error('\n>>> In the browser window:');
+      console.error('    1. Click a period preset (5Y covers ~5 years) OR set the From/To dates by hand.');
+      console.error('    2. Click Search. Solve the reCAPTCHA if one appears (automation trips it; a human usually passes silently).');
+      console.error('    3. Wait for the announcements table to fill, then press Enter here to harvest.');
       await askEnter('');
+      // Post-Enter sanity: confirm the table actually loaded a multi-day range before harvesting.
+      const rows = await page.evaluate(EXTRACT).catch(() => []);
+      const dates = rows.map(r => ddmmyyyyToISO(r.date)).filter(Boolean).sort();
+      if (dates.length < 5) {
+        console.error(`⚠ only ${rows.length} rows visible — the table may not have loaded (reCAPTCHA / search not run). Harvesting anyway; re-run if the result is thin.`);
+      } else {
+        console.error(`✓ table loaded — visible rows span ${dates[0]}…${dates[dates.length - 1]} (${rows.length} on this view). Harvesting…`);
+      }
     }
     all = await harvestClickThrough(page, PAGES);
   } else {
