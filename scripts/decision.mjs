@@ -10,18 +10,32 @@
  *   npm run decision -- --acct 250000
  *   DECISION_ACCT=50000 npm run decision
  *   npm run decision -- --json       # machine-readable (alerts/cron); JSON is the LAST stdout line
+ *   npm run decision -- --quiet      # suppress the db boot log (--json implies --quiet)
+ *   npm run --silent decision -- --json | jq      # clean pipe (--silent drops npm's own run banner)
+ *   node --experimental-sqlite scripts/decision.mjs --json | jq   # or call node directly
  *
  * Note: prices/picks are point-in-time. Re-run on the rebalance morning before trading —
  * the list can shift. Debt/cash ratios shown are indicative; confirm AAOIFI per name.
  */
-import './../dashboard/db.js';
-import { positions as dbPositions } from '../dashboard/db.js';
-import { getMomentumScreen, sarPerName } from '../dashboard/momentum_screen.mjs';
-
 const arg = (flag) => { const i = process.argv.indexOf(flag); return i > -1 ? process.argv[i + 1] : null; };
 const has = (flag) => process.argv.includes(flag);
 const ACCT = +(arg('--acct') || process.env.DECISION_ACCT || 100000);
 const JSON_OUT = has('--json');
+const QUIET = has('--quiet') || JSON_OUT;   // db.js logs "[db] migrated…" at import time
+
+// Dynamic import so we can mute the db boot log (it fires during module init, before any of
+// our code would otherwise run — imported modules execute before a static importer's body).
+async function loadDeps() {
+  const orig = console.log;
+  if (QUIET) console.log = () => {};
+  try {
+    const db = await import('../dashboard/db.js');
+    const screen = await import('../dashboard/momentum_screen.mjs');
+    return { dbPositions: db.positions, getMomentumScreen: screen.getMomentumScreen, sarPerName: screen.sarPerName };
+  } finally {
+    console.log = orig;
+  }
+}
 const fmtSar = (n) => 'SAR ' + Math.round(n).toLocaleString('en-US');
 const pct = (n) => (n >= 0 ? '+' : '') + (+n).toFixed(1) + '%';
 // Pull "debt NN%" out of the indicative Sharia note so we can flag near-threshold names.
@@ -37,6 +51,7 @@ function rowLine(h, perName) {
 }
 
 async function main() {
+  const { dbPositions, getMomentumScreen, sarPerName } = await loadDeps();
   const heldSyms = Object.keys(dbPositions.getAll() || {});
   const r = await getMomentumScreen({ heldSyms });
   if (!r.success) { console.error('FAILED:', r.error); process.exit(1); }
