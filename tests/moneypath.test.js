@@ -19,9 +19,6 @@ import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/co
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
 import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
 import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
-import { getContractFlowSignal } from '../dashboard/contract_flow_signal.mjs';
-import { getBars, iso } from '../scripts/bars_cache.mjs';
-import { toYahooSym } from '../scripts/tasi_screener.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -647,41 +644,6 @@ describe('contract_flow helpers', () => {
     assert.equal(isContractHeadline(null), false);
     assert.equal(isContractHeadline('CO. ANNOUNCES A TENDER WIN'), true);
     assert.equal(isContractHeadline('Co. announces a PURCHASE ORDER receipt'), true);
-  });
-});
-
-// ── contract_flow SIGNAL module (integration: catalyst_events + bars) ──────────
-describe('contract_flow signal bucketing', () => {
-  const GOVT = 'TADAWUL:2222', PRIV = 'TADAWUL:1120';   // two liquid names with cached bars
-  let awardDate = null, haveBars = false;
-  before(async () => {
-    const a = await getBars(toYahooSym(GOVT), '10y');
-    const b = await getBars(toYahooSym(PRIV), '10y');
-    if (a.length > 10 && b.length > 10) {
-      haveBars = true;
-      awardDate = iso(a[a.length - 4].t);              // ~3 sessions ago → inside the 20-session window
-    }
-    db.prepare("DELETE FROM catalyst_events WHERE source='test'").run();
-    if (haveBars) {
-      const ins = db.prepare("INSERT OR IGNORE INTO catalyst_events (sym,event_date,type,headline,source) VALUES (?,?,?,?,'test')");
-      ins.run(GOVT, awardDate, 'contract', 'Test Co. Announces Project Award with the Ministry of Health');
-      ins.run(PRIV, awardDate, 'contract', 'Test Co. Announces Contract Sign Off with Acme Trading Company');
-    }
-  });
-  after(() => { db.prepare("DELETE FROM catalyst_events WHERE source='test'").run(); });
-
-  it('routes govt awards to signals and private awards to the control bucket', async () => {
-    if (!haveBars) return;   // bars unavailable (offline) — skip the assertion rather than false-fail
-    const r = await getContractFlowSignal();
-    assert.equal(r.success, true);
-    const g = (r.signals || []).find(s => s.code === '2222');
-    const p = (r.other || []).find(s => s.code === '1120');
-    assert.ok(g, 'govt award (2222) should be in signals');
-    assert.equal(g.counterparty, 'govt');
-    assert.ok(g.sessionsLeft > 0 && g.sessionsLeft <= 20, 'govt award should be inside the active window');
-    assert.ok(p, 'private award (1120) should be in the control bucket');
-    assert.equal(p.counterparty, 'private');
-    assert.equal((r.signals || []).some(s => s.code === '1120'), false, 'private award must NOT be signalled');
   });
 });
 

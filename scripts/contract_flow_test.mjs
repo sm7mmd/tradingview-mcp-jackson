@@ -2,10 +2,19 @@
  * contract_flow_test.mjs — do GOVT/Vision-2030 contract awards to LIQUID TASI companies drift up
  * over 20 trading days? Reaction to forced/under-reacted megaproject flow (alt-data layer #4).
  *
+ * ⚠️ SUPERSEDED — DO NOT TRUST THIS SCRIPT'S "SIGNAL" VERDICT. It measures drift vs ^TASI (the
+ * condemned cap-weighted benchmark) and runs NW-t on the POOLED list of overlapping, calendar-
+ * clustered events. Newey-West removes serial — NOT cross-sectional — correlation, the exact trap
+ * that made the dead 9-pt score's pooled t=3.89 look real (honest per-period t=0.74). When re-run
+ * through the proper per-period guillotine (equal-weight basket, one obs / non-overlapping window),
+ * the govt∩liquid t collapses 2.94→0.90 and the govt−private spread vanishes to +0.09% (t 0.09).
+ * Contract-flow is NOT a validated edge. The authoritative test is contract_flow_guillotine_test.mjs.
+ * Kept only as the documented record of how the pooled-NW result was wrong.
+ *
  * For each matured 'contract' catalyst (anti-leakage gated): classify counterparty (govt|private),
  * compute trailing-60d liquidity, keep the top-half-liquid set, measure 20d forward abnormal drift
- * [+1,+21] vs ^TASI. Compare govt vs private. Net 0.11% RT + slippage. NW-t, trim-one, underpowered.
- * Single 4-month window (Feb→Jun 2026). Run: node --experimental-sqlite scripts/contract_flow_test.mjs
+ * [+1,+21] vs ^TASI. Compare govt vs private. Net 0.11% RT + slippage. NW-t, trim-one.
+ * Run: node --experimental-sqlite scripts/contract_flow_test.mjs
  * Spec: docs/superpowers/specs/2026-06-21-contract-flow-design.md
  */
 import { getBars, warm, iso } from './bars_cache.mjs';
@@ -94,7 +103,8 @@ function report(label, arr) {
     console.log(`  UNDERPOWERED — only ${govt.length} liquid govt awards (<${MIN_N}); not reliable. Harvest more contract history.`);
   } else {
     const tstat = nwT(govt.map(r => r.drift));
-    const pass = g.netMean > 0 && tstat > 2 && spread > 0;
-    console.log(`  ${pass ? 'SIGNAL' : 'NO SIGNAL'} — net drift ${pct(g.netMean)}, NW-t ${(tstat || 0).toFixed(2)}, beats private ${spread > 0} (need net>0 AND t>2 AND spread>0 AND trim-one stable).`);
+    console.log(`  pooled-NW: net drift ${pct(g.netMean)}, NW-t ${(tstat || 0).toFixed(2)}, beats private ${spread > 0}.`);
+    console.log(`  ⚠️ This pooled-NW number is INFLATED by cross-sectional clustering + the ^TASI benchmark.`);
+    console.log(`  Authoritative verdict = contract_flow_guillotine_test.mjs: per-period t 0.90, spread t 0.09 → NOT an edge.`);
   }
 })();

@@ -11,10 +11,10 @@ _Last updated: 2026-06-21_
   - Auto-restores to ×1.0 when the rolling window strengthens; auto-cuts further if it weakens. No manual demote endpoint by design (downgrade is automatic only).
   - State persists in the local SQLite DB (not version-controlled).
 
-## Validated edges
+## Validated edge
 
-- **Sharia momentum** (top-quintile 6-1mo, monthly, equal-weight, liquid-half, ≥2y-listed) on Derayah (0.11% RT) — the **core edge**: excess ~+10–15%/yr, NW-t 2.6–3.2, OOS-stable. Absolute CAGR carries an accepted ~1–1.5%/yr survivorship haircut (disclosed in the Lab). Sizing = **Scheme-D** (vol-target 15% + seasonal sit-out), governed by the state machine above.
-- **Govt / Vision-2030 contract-flow** (confirmed 2026-06-21) — a **modest event overlay**: +1.15%/award net over ~20 sessions, NW-t 2.94, n=375, private-sector control ≈0. Live in the dashboard Signals tab (see below).
+- **Sharia momentum** (top-quintile 6-1mo, monthly, equal-weight, liquid-half, ≥2y-listed) on Derayah (0.11% RT) is the **one validated edge**: excess ~+10–15%/yr, per-period t=3.60 (passes the cross-clustering-robust guillotine), OOS both halves. Absolute CAGR carries an accepted ~1–1.5%/yr survivorship haircut (disclosed in the Lab). Sizing = **Scheme-D** (vol-target 15% + seasonal sit-out), governed by the state machine above.
+- **Govt contract-flow — TESTED & FAILED (2026-06-21), not an edge.** Briefly thought confirmed on a pooled NW-t 2.94, but that was cross-sectional-clustering + wrong-benchmark (^TASI) inflation — the same trap that killed the 9-pt score. Under the proper per-period guillotine (equal-weight basket, one obs/non-overlapping window) the t collapses to 0.90 and the govt−private spread to +0.09% (t 0.09). Dashboard card removed. Record kept in `scripts/contract_flow_guillotine_test.mjs`.
 
 ## Above-modest research verdicts (2026-06-21)
 
@@ -25,17 +25,17 @@ Four upside layers tested under OOS-aware discipline:
 | #1 Compounding-geometry sizing (vol-target / conviction / drawdown-brake) | **All killed** — walk-forward refuted the brake (insurance, not edge) |
 | #2 Flow / MSCI-rebalance front-running | **NO SIGNAL** — move is spent before the public announcement |
 | #3 PEAD (earnings-drift) | **NO SIGNAL** — drift U-shaped, not monotonic; season-OOS flips |
-| #4 Govt / Vision-2030 contract-flow | **CONFIRMED (2nd edge)** — full-history harvest grew n=22→375; net drift +1.15%/20d, NW-t 2.94, beats private control, trim-one stable. Effect shrank from the n=22 estimate (+4.15% was small-sample inflation). |
+| #4 Govt / Vision-2030 contract-flow | **TESTED & FAILED** — looked confirmed on pooled NW-t 2.94, but the per-period guillotine collapsed it to t 0.90 (spread t 0.09). Clustering + ^TASI-benchmark inflation, same as the 9-pt score. Not an edge. |
 
-Momentum equal-weight remained the strongest return engine in every test; govt contract-flow is a modest event overlay on top.
+Momentum equal-weight remained the strongest — and only — return engine that survives the honest per-period test.
 
-### Govt contract-flow — confirmed 2026-06-21
+### Govt contract-flow — tested and rejected (2026-06-21)
 
-When a company wins a **government / Vision-2030 contract**, its stock drifts ~**+1.15%** over the next 20 trading days, net of cost — statistically solid (NW-t 2.94, n=375, trim-stable, and private-sector contracts show no such drift = the control). Unlocked by cracking the saudiexchange.sa harvest (JSON endpoint called in-page, bypasses Akamai + reCAPTCHA; `harvest_catalysts.mjs` rewritten around it). Contracts in DB 207→2,392 (2021→2026). **Now live in the dashboard** — a "Contract-Flow Signal 🏗️" card in the Signals tab lists govt awards still inside the ~20-session window (liquid + compliant first), built by `dashboard/contract_flow_signal.mjs` (`getContractFlowSignal` → `/api/lab/contractflow`).
+Initially looked like a 2nd edge: after cracking the saudiexchange.sa harvest (JSON endpoint in-page, bypasses Akamai + reCAPTCHA; `harvest_catalysts.mjs` rewritten around it — contracts 207→2,392, 2021→2026), `contract_flow_test.mjs` reported govt∩liquid +1.15%/20d at NW-t 2.94. **But that test used the condemned ^TASI cap-weighted benchmark and NW-t on a pooled list of overlapping, calendar-clustered events — the exact inflation that made the dead 9-pt score's pooled t=3.89 look real.** Re-run through the per-period guillotine (`contract_flow_guillotine_test.mjs`: equal-weight basket, one obs/non-overlapping 20-session window, 60 periods ~4.8y): govt∩liquid excess +0.87%/pd but **t 0.90**, govt−private spread **+0.09% t 0.09**. **NOT a validated edge.** Dashboard card + route + signal module removed; harvester + helpers + both research scripts kept as the record. Lesson: pooled NW-t is not a substitute for the cross-clustering-robust per-period test — no signal earns "validated" without it.
 
 ## Decision view (shipped)
 
-The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date → **Block-Deal Signal 🐋** + **Contract-Flow Signal 🏗️** cards (the two event overlays). Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
+The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date → **Block-Deal Signal 🐋** card. Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
 
 **CLI: `npm run decision`** — the same monthly call without the dashboard server. Prints state → sizing → account split → next rebalance → BUY/HOLD/SELL with live prices, momentum, ~share counts, and ⚠ debt-≥50% flags. Flags:
 - `--acct N` — account size for SAR sizing (default 100k)
@@ -47,9 +47,9 @@ Pure helpers (`normalizeHeld`, `computeTurnover`, `sarPerName`) unit-tested incl
 
 ## Open threads (require user action)
 
-- **Contract-flow ✅ CONFIRMED + SHIPPED** (2026-06-21) — full 5-year harvest powered n=22→375 (verdict SIGNAL); now wired into the dashboard Signals tab. Re-harvest top-up any time: `HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs` (full history) or `--period "1 month"` (daily).
-- **Operate it** — trade the monthly picks on Derayah (`npm run decision`), watch the contract-flow card for govt-award entries, log positions back, build a live track record.
+- **Contract-flow ❌ TESTED & REJECTED** (2026-06-21) — failed the per-period guillotine (t 0.90, spread t 0.09); dashboard card removed. The harvester rewrite (JSON API, contracts 207→2,392) is the lasting win and stays. Re-harvest any time: `HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs`.
+- **Operate it** — trade the monthly momentum picks on Derayah (`npm run decision`), log positions back, build a live track record.
 
 ## Tests
 
-Full runnable suite green: `test:unit` 29 · `test:strategy` 23 · `test:money` 115. (e2e needs a live TradingView CDP session; not run here.)
+Full runnable suite green: `test:unit` 29 · `test:strategy` 23 · `test:money` 114. (e2e needs a live TradingView CDP session; not run here.)

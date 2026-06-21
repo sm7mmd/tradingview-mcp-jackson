@@ -25,7 +25,6 @@ import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_H
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
-import { getContractFlowSignal } from "./contract_flow_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 import { json, html, readBody } from "./http_util.mjs";
@@ -2247,13 +2246,6 @@ const server = createServer(async (req, res) => {
   if (path === '/api/lab/blockdeals' && method === 'GET') {
     try {
       return json(res, await getBlockDealSignal());
-    } catch(e) { return json(res, { success: false, error: e.message }, 500); }
-  }
-
-  // Contract-flow signal: validated "govt/Vision-2030 award drift, ~1mo hold" watch-list.
-  if (path === '/api/lab/contractflow' && method === 'GET') {
-    try {
-      return json(res, await getContractFlowSignal());
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
   }
 

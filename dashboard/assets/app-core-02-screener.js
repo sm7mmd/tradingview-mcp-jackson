@@ -18,8 +18,8 @@ function switchTab(name,btn){
   if(name==='goals'){ loadGoalsPanel(); }
   // Lab tab
   if(name==='lab'){ loadLabPanel(); loadStrategyValidation(); }
-  // Momentum Screen tab (+ block-deal & contract-flow signals)
-  if(name==='momentum'){ loadMomentumScreen(); loadBlockDealSignal(); loadContractFlowSignal(); }
+  // Momentum Screen tab (+ block-deal signal)
+  if(name==='momentum'){ loadMomentumScreen(); loadBlockDealSignal(); }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
