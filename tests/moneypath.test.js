@@ -674,4 +674,12 @@ describe('decision --held normalization', () => {
     assert.deepEqual(normalizeHeld(''), []);
     assert.deepEqual(normalizeHeld(null), []);
   });
+  it('feeds computeTurnover end-to-end: bare codes resolve to BUY/HOLD/SELL', () => {
+    const picks = ['TADAWUL:2200', 'TADAWUL:2222', 'TADAWUL:1321'];
+    const held = normalizeHeld('2222,9999');            // 2222 held & picked → HOLD; 9999 held, not picked → SELL
+    const t = computeTurnover(picks, held);
+    assert.deepEqual(t.hold, ['TADAWUL:2222']);
+    assert.deepEqual(t.sell, ['TADAWUL:9999']);
+    assert.deepEqual(t.buy, ['TADAWUL:2200', 'TADAWUL:1321']);
+  });
 });
