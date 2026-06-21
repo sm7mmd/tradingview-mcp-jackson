@@ -34,7 +34,6 @@
  * Requires: playwright (devDependencies).
  */
 import { chromium } from 'playwright';
-import { createInterface } from 'node:readline';
 import { ingestCatalysts, catalystsSummary } from '../dashboard/catalysts.mjs';
 
 const arg = (flag) => { const i = process.argv.indexOf(flag); return i > -1 ? process.argv[i + 1] : null; };
@@ -43,6 +42,7 @@ const PAGES = +(arg('--pages') || 5);          // page-mode pages, or max Next-c
 const FROM = arg('--from');                     // YYYY-MM-DD
 const TO = arg('--to');                         // YYYY-MM-DD
 const PAUSE = has('--pause');
+const WATCH_S = +(arg('--watch') || 360);   // --pause: max seconds to wait for you to load the table
 const HEADLESS = process.env.HEADLESS !== 'false';
 const URL = 'https://www.saudiexchange.sa/wps/portal/saudiexchange/newsandreports/issuer-news/issuer-announcements?locale=en';
 const BASE_PAGED = URL + '&page=';
@@ -172,10 +172,6 @@ async function harvestClickThrough(page, maxClicks) {
   return all;
 }
 
-function askEnter(msg) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(res => rl.question(msg, () => { rl.close(); res(); }));
-}
 
 async function main() {
   if ((FROM && !TO) || (!FROM && TO)) { console.error('Provide BOTH --from and --to (YYYY-MM-DD).'); process.exit(1); }
@@ -211,19 +207,29 @@ async function main() {
       }
     }
     if (PAUSE) {
-      console.error('\n>>> In the browser window:');
+      console.error('\n>>> In the browser window (no need to touch this terminal — it auto-detects):');
       console.error('    1. Click a period preset (5Y covers ~5 years) OR set the From/To dates by hand.');
       console.error('    2. Click Search. Solve the reCAPTCHA if one appears (automation trips it; a human usually passes silently).');
-      console.error('    3. Wait for the announcements table to fill, then press Enter here to harvest.');
-      await askEnter('');
-      // Post-Enter sanity: confirm the table actually loaded a multi-day range before harvesting.
-      const rows = await page.evaluate(EXTRACT).catch(() => []);
-      const dates = rows.map(r => ddmmyyyyToISO(r.date)).filter(Boolean).sort();
-      if (dates.length < 5) {
-        console.error(`⚠ only ${rows.length} rows visible — the table may not have loaded (reCAPTCHA / search not run). Harvesting anyway; re-run if the result is thin.`);
-      } else {
-        console.error(`✓ table loaded — visible rows span ${dates[0]}…${dates[dates.length - 1]} (${rows.length} on this view). Harvesting…`);
+      console.error(`    3. Wait for the announcements table to fill. Harvest starts automatically (watching up to ${WATCH_S}s).`);
+      // Auto-detect instead of an Enter prompt (works when run as a background task): poll until
+      // the table shows ≥15 dated rows spanning >45 days (i.e. real history loaded, not the
+      // default current-day view), then harvest. Falls back to harvesting whatever's there.
+      const t0 = Date.now();
+      let loaded = false;
+      while (Date.now() - t0 < WATCH_S * 1000) {
+        const rows = await page.evaluate(EXTRACT).catch(() => []);
+        const dates = rows.map(r => ddmmyyyyToISO(r.date)).filter(Boolean).sort();
+        if (dates.length >= 15) {
+          const spanDays = (+new Date(dates[dates.length - 1]) - +new Date(dates[0])) / 864e5;
+          if (spanDays > 45) {
+            console.error(`✓ detected loaded table — ${rows.length} rows span ${dates[0]}…${dates[dates.length - 1]}. Harvesting in 3s…`);
+            loaded = true; break;
+          }
+        }
+        await page.waitForTimeout(3000);
       }
+      if (!loaded) console.error(`⚠ ${WATCH_S}s elapsed without a multi-month table — harvesting current view anyway (re-run if thin).`);
+      await page.waitForTimeout(3000);
     }
     all = await harvestClickThrough(page, PAGES);
   } else {
