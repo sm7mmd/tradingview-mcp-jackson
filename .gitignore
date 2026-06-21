@@ -39,3 +39,6 @@ dashboard/*.json
 
 # On-disk price cache (regenerable)
 data/bars_cache.json
+
+# Sharia compliance dataset is curated reference data — DO track it
+!dashboard/sharia_data.json

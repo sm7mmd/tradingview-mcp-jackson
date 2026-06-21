@@ -15,12 +15,59 @@
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
 import { getShariaStatus } from './sharia.mjs';
+import { getState, transitions } from './strategy_state.mjs';
 
 const sd = a => { if (a.length < 2) return NaN; const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15 } = {}) {
+// Scheme-D gross exposure: vol-target (cap 1, scale so realized vol ≈ targetVol) ×
+// seasonal sit-out (0 in a weak month) × state-machine governor (candidate/retired 0,
+// decaying 0.5, promoted 1). Pure so the money math is unit-testable.
+export function schemeDExposure({ realizedVol, targetVol = 0.15, inSeason, stateMult }) {
+  let e = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
+  if (!inSeason) e = 0;                               // weak month → sit out
+  return e * stateMult;
+}
+
+// Plain-language sizing note. Pure so the two zero-exposure causes (weak month vs
+// not-live) and the seasonal+candidate combo are unit-testable without bars.
+export function sizingNote({ exposure, exposurePct, stateMult, inSeason, targetVol = 0.15, nHoldings = 1 }) {
+  if (exposure === 0) {
+    if (stateMult === 0) {
+      return inSeason
+        ? `Strategy not live yet (state-machine status: candidate/retired) — 0% deployed. Promote it in the Lab's Strategy Edge card to go live.`
+        : `Strategy not live yet (candidate/retired) AND a seasonal weak month — 0% deployed. Even after promoting, sizing stays 0% until the weak month passes.`;
+    }
+    return `Weak month — model says HOLD CASH (0% invested).`;
+  }
+  const perPos = (exposurePct / Math.max(1, nHoldings)).toFixed(1);
+  return `Put ${exposurePct}% of the account to work (≈${perPos}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget${stateMult < 1 ? ' and is HALVED because the strategy is decaying' : ''}.`;
+}
+
+/**
+ * Monthly turnover vs the user's actual holdings (basis A).
+ *   buy  = picks not currently held   hold = picks held   sell = held but no longer a pick
+ * Operates on `TADAWUL:${code}` strings; preserves pickSyms order for buy/hold.
+ */
+export function computeTurnover(pickSyms, heldSyms) {
+  const held = new Set(heldSyms || []);
+  const picks = new Set(pickSyms || []);
+  const buy = (pickSyms || []).filter(s => !held.has(s));
+  const hold = (pickSyms || []).filter(s => held.has(s));
+  const sell = (heldSyms || []).filter(s => !picks.has(s));
+  return { buy, hold, sell };
+}
+
+/** SAR per name from account size × deployed fraction, whole-SAR rounded. nHoldings 0 → all cash. */
+export function sarPerName({ accountSize = 0, exposurePct = 0, nHoldings = 0 } = {}) {
+  const deployFrac = (exposurePct || 0) / 100;
+  const perName = nHoldings > 0 ? Math.round(accountSize * deployFrac / nHoldings) : 0;
+  const totalDeployed = perName * nHoldings;
+  return { perName, totalDeployed, cash: Math.round(accountSize) - totalDeployed };
+}
+
+export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15, heldSyms = [] } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
   await warm(ysyms, '10y');                       // cache-aware; refetches only if stale
@@ -91,8 +138,9 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   }
   const portDaily = Object.keys(dayRet).sort().map(t => mean(dayRet[t])).filter(isFinite);
   const realizedVol = portDaily.length >= 20 ? sd(portDaily) * Math.sqrt(252) : null;
-  let exposure = realizedVol && realizedVol > 0 ? Math.min(1, targetVol / realizedVol) : 1;
-  if (!seasonal.inSeason) exposure = 0;               // weak month → sit out
+  // State-machine governor: candidate/retired→0, decaying→×0.5, promoted→×1.0
+  const stateMult = getState('momentum-sharia').exposure_mult;
+  const exposure = schemeDExposure({ realizedVol, targetVol, inSeason: seasonal.inSeason, stateMult });
   const exposurePct = +(exposure * 100).toFixed(0);
   const sizing = {
     model: 'vol-target + seasonal sit-out (Scheme D)',
@@ -100,10 +148,27 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     realizedVolPct: realizedVol ? +(realizedVol * 100).toFixed(0) : null,
     exposurePct, cashPct: 100 - exposurePct,
     perPositionPct: +(exposurePct / Math.max(1, holdings.length)).toFixed(1),
-    note: exposure === 0
-      ? `Weak month — model says HOLD CASH (0% invested).`
-      : `Put ${exposurePct}% of the account to work (≈${(exposurePct / Math.max(1, holdings.length)).toFixed(1)}% per name), keep ${100 - exposurePct}% cash. Sizing caps risk to a ${(targetVol * 100).toFixed(0)}% volatility budget — it lowers exposure when the market gets choppy so a bad year (e.g. 2025) costs ~−8% not ~−21%.`,
+    note: sizingNote({ exposure, exposurePct, stateMult, inSeason: seasonal.inSeason, targetVol, nHoldings: holdings.length }),
+    breakdown: {
+      targetVolPct: +(targetVol * 100).toFixed(0),
+      realizedVolPct: realizedVol ? +(realizedVol * 100).toFixed(0) : null,
+      volTargetRaw: realizedVol && realizedVol > 0 ? +Math.min(1, targetVol / realizedVol).toFixed(2) : 1,
+      seasonalMult: seasonal.inSeason ? 1 : 0,
+      stateMult,
+      finalExposurePct: exposurePct,
+    },
   };
+
+  const turnover = computeTurnover(holdings.map(h => h.sym), heldSyms);
+  const nameOf = (sym) => (TASI_STOCKS.find(s => s.sym === sym)?.name) || sym.replace('TADAWUL:', '');
+  const turnoverNamed = {
+    buy: turnover.buy.map(sym => holdings.find(h => h.sym === sym)),
+    hold: turnover.hold.map(sym => holdings.find(h => h.sym === sym)),
+    sell: turnover.sell.map(sym => ({ sym, name: nameOf(sym) })),
+  };
+
+  const st = getState('momentum-sharia');
+  const strategyState = { status: st.state, exposure_mult: st.exposure_mult, reason: transitions('momentum-sharia', 1)[0]?.reason || null };
 
   return {
     success: true, asOf, nextRebalance,
@@ -112,6 +177,8 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     validated: { excessPerYr: '+10 to +15%/yr', absCagr: '15–25%/yr', nwT: '2.6–3.2', maxDD: '~−26% (better than basket)', caveat: 'OOS-stable; survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
     seasonal,
     sizing,
+    turnover: turnoverNamed,
+    state: strategyState,
     holdings,
   };
 }

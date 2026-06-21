@@ -25,7 +25,14 @@ import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_H
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
+import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
+import { json, html, readBody } from "./http_util.mjs";
+import { state } from "./state.mjs";
+import { sendTelegram } from "./notify.mjs";
+import { getUpcomingEvents } from "./macro.mjs";
+import { fetchGoogleNews, getEarningsCalendar, newsCache, NEWS_TTL } from "./news.mjs";
+import { tickerDisplay, BEAR_BIASES, resolveSignalLabel, computeVelocity, sectorOf, computeDelta } from "./signal_format.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -48,19 +55,6 @@ mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const API_KEY = process.env.DASHBOARD_API_KEY || '';
 if (!API_KEY) console.warn('[auth] DASHBOARD_API_KEY not set — dashboard is unprotected. Add it to .env to enable.');
-
-function tickerDisplay(sym) { const i = sym.indexOf(":"); return i >= 0 ? sym.slice(i + 1) : sym; }
-
-// ── Telegram ──────────────────────────────────────────────────────────────────
-async function sendTelegram(token, chatId, text) {
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-    });
-    return r.json();
-  } catch (e) { return { ok: false, description: e.message }; }
-}
 
 // ── Market Regime ─────────────────────────────────────────────────────────────
 async function getSymbolMetrics(meta) {
@@ -122,133 +116,6 @@ const OVERVIEW_SYMBOLS = [
 ];
 let overviewCache = { data: null, ts: 0 };
 const OVERVIEW_TTL = 20 * 60 * 1000;
-
-// ── Finnhub Calendar ──────────────────────────────────────────────────────────
-async function getEarningsCalendar(sym) {
-  const token = state.settings?.finnhub_token;
-  if (!token) return null;
-  const base = sym.includes(":") ? sym.split(":")[1] : sym;
-  const today = new Date().toISOString().split("T")[0];
-  const ahead = new Date(Date.now() + 35 * 864e5).toISOString().split("T")[0];
-  try {
-    const r = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${today}&to=${ahead}&symbol=${base}&token=${token}`);
-    const d = await r.json();
-    return d?.earningsCalendar?.[0] || null;
-  } catch (_) { return null; }
-}
-
-// ── Google News RSS ────────────────────────────────────────────────────────────
-const newsCache = new Map();
-const NEWS_TTL  = 30 * 60 * 1000;
-
-async function fetchGoogleNews(query, hl = 'en', gl = 'SA', ceid = 'SA:en') {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return [];
-  const xml = await res.text();
-  const items = [];
-  const re = /<item>([\s\S]*?)<\/item>/g;
-  let m;
-  while ((m = re.exec(xml)) !== null) {
-    const block = m[1];
-    const title   = (block.match(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/) || block.match(/<title>([^<]+)<\/title>/))?.[1]?.trim() || '';
-    const link    = block.match(/<link>([^<]+)<\/link>/)?.[1]?.trim() || block.match(/<guid[^>]*>([^<]+)<\/guid>/)?.[1]?.trim() || '';
-    const pubDate = block.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1]?.trim() || '';
-    const source  = (block.match(/<source[^>]*>([^<]+)<\/source>/) || block.match(/<source[^>]*\/?>/))?.[1]?.trim() || '';
-    if (title && link) {
-      items.push({ title, url: link, source, published: pubDate, lang: hl === 'ar' ? 'ar' : 'en' });
-      if (items.length >= 8) break;
-    }
-  }
-  return items;
-}
-
-// ── Macro Calendar ────────────────────────────────────────────────────────────
-// Hardcoded 2025-2026 macro events. Add new rows each year.
-// impact: 'high' | 'medium' | 'low'
-// tasiImpact: 'bullish' | 'bearish' | 'neutral' | 'closed' | null (unknown until event)
-const MACRO_EVENTS = [
-  // ── Saudi Public Holidays 2026 (TASI closed) ──────────────────────────────
-  { date: '2026-02-22', type: 'holiday', label: 'Saudi Founding Day', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-03-28', type: 'holiday', label: 'Eid Al-Fitr Holiday', detail: 'TASI closed (approx)', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-03-29', type: 'holiday', label: 'Eid Al-Fitr Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-03-30', type: 'holiday', label: 'Eid Al-Fitr Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-03-31', type: 'holiday', label: 'Eid Al-Fitr Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-04-01', type: 'holiday', label: 'Eid Al-Fitr Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-06-04', type: 'holiday', label: 'Eid Al-Adha Holiday', detail: 'TASI closed (approx)', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-06-05', type: 'holiday', label: 'Eid Al-Adha Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-06-06', type: 'holiday', label: 'Eid Al-Adha Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-06-07', type: 'holiday', label: 'Eid Al-Adha Holiday', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  { date: '2026-09-23', type: 'holiday', label: 'Saudi National Day', detail: 'TASI closed', impact: 'low', tasiImpact: 'closed' },
-  // ── US Federal Reserve (FOMC) 2026 ────────────────────────────────────────
-  { date: '2026-01-28', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-03-18', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-05-06', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-06-17', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-07-29', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-09-16', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-11-04', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  { date: '2026-12-16', type: 'fed',     label: 'FOMC Rate Decision', detail: 'US Federal Reserve interest rate decision', impact: 'high', tasiImpact: null },
-  // ── SAMA (Saudi Central Bank) ─────────────────────────────────────────────
-  // SAMA typically moves in sync with Fed; exact dates announced closer to meeting
-  { date: '2026-03-19', type: 'sama',    label: 'SAMA Rate Decision', detail: 'Saudi Central Bank — follows Fed direction', impact: 'high', tasiImpact: null },
-  { date: '2026-06-18', type: 'sama',    label: 'SAMA Rate Decision', detail: 'Saudi Central Bank — follows Fed direction', impact: 'high', tasiImpact: null },
-  { date: '2026-09-17', type: 'sama',    label: 'SAMA Rate Decision', detail: 'Saudi Central Bank — follows Fed direction', impact: 'high', tasiImpact: null },
-  { date: '2026-12-17', type: 'sama',    label: 'SAMA Rate Decision', detail: 'Saudi Central Bank — follows Fed direction', impact: 'high', tasiImpact: null },
-  // ── OPEC / OPEC+ ─────────────────────────────────────────────────────────
-  { date: '2026-05-28', type: 'opec',    label: 'OPEC+ Meeting', detail: 'Oil output policy decision — directly affects Saudi Aramco & energy sector', impact: 'high', tasiImpact: null },
-  { date: '2026-11-26', type: 'opec',    label: 'OPEC+ Meeting', detail: 'Oil output policy decision — directly affects Saudi Aramco & energy sector', impact: 'high', tasiImpact: null },
-  // ── US CPI (inflation) ────────────────────────────────────────────────────
-  { date: '2026-01-15', type: 'cpi',     label: 'US CPI (Dec)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-02-12', type: 'cpi',     label: 'US CPI (Jan)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-03-12', type: 'cpi',     label: 'US CPI (Feb)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-04-10', type: 'cpi',     label: 'US CPI (Mar)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-05-12', type: 'cpi',     label: 'US CPI (Apr)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-06-11', type: 'cpi',     label: 'US CPI (May)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-07-15', type: 'cpi',     label: 'US CPI (Jun)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-08-13', type: 'cpi',     label: 'US CPI (Jul)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-09-11', type: 'cpi',     label: 'US CPI (Aug)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-10-14', type: 'cpi',     label: 'US CPI (Sep)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-11-12', type: 'cpi',     label: 'US CPI (Oct)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  { date: '2026-12-11', type: 'cpi',     label: 'US CPI (Nov)', detail: 'US inflation data — influences Fed path & global risk appetite', impact: 'medium', tasiImpact: null },
-  // ── US Non-Farm Payrolls ──────────────────────────────────────────────────
-  { date: '2026-01-09', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-02-06', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-03-06', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-04-03', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-05-01', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-06-05', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-07-02', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-08-07', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-09-04', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-10-02', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-11-06', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  { date: '2026-12-04', type: 'nfp',     label: 'US Jobs (NFP)', detail: 'Non-Farm Payrolls — labor market strength affects Fed policy', impact: 'medium', tasiImpact: null },
-  // ── Saudi TASI Earnings Season ────────────────────────────────────────────
-  { date: '2026-01-20', type: 'earnings', label: 'TASI Q4 Earnings Season', detail: 'Major Saudi companies report Q4 2025 results — expect elevated volatility', impact: 'medium', tasiImpact: null },
-  { date: '2026-04-20', type: 'earnings', label: 'TASI Q1 Earnings Season', detail: 'Major Saudi companies report Q1 2026 results — expect elevated volatility', impact: 'medium', tasiImpact: null },
-  { date: '2026-07-20', type: 'earnings', label: 'TASI Q2 Earnings Season', detail: 'Major Saudi companies report Q2 2026 results — expect elevated volatility', impact: 'medium', tasiImpact: null },
-  { date: '2026-10-20', type: 'earnings', label: 'TASI Q3 Earnings Season', detail: 'Major Saudi companies report Q3 2026 results — expect elevated volatility', impact: 'medium', tasiImpact: null },
-  // ── Jackson Hole (Fed annual symposium) ────────────────────────────────────
-  { date: '2026-08-27', type: 'fed',     label: 'Jackson Hole Symposium', detail: 'Fed Chair annual speech — major policy signal for markets globally', impact: 'high', tasiImpact: null },
-  // ── Saudi Vision 2030 / Saudi GDP ─────────────────────────────────────────
-  { date: '2026-03-15', type: 'macro',   label: 'Saudi GDP Q4 2025', detail: 'Saudi quarterly GDP release — signals domestic economic health', impact: 'medium', tasiImpact: null },
-  { date: '2026-06-15', type: 'macro',   label: 'Saudi GDP Q1 2026', detail: 'Saudi quarterly GDP release — signals domestic economic health', impact: 'medium', tasiImpact: null },
-  { date: '2026-09-15', type: 'macro',   label: 'Saudi GDP Q2 2026', detail: 'Saudi quarterly GDP release — signals domestic economic health', impact: 'medium', tasiImpact: null },
-  { date: '2026-12-15', type: 'macro',   label: 'Saudi GDP Q3 2026', detail: 'Saudi quarterly GDP release — signals domestic economic health', impact: 'medium', tasiImpact: null },
-];
-
-function getUpcomingEvents(daysAhead = 21) {
-  const nowKSA   = new Date(Date.now() + 3 * 3600 * 1000);
-  const todayStr = nowKSA.toISOString().slice(0, 10);
-  const endDate  = new Date(nowKSA.getTime() + daysAhead * 86400 * 1000).toISOString().slice(0, 10);
-  return MACRO_EVENTS
-    .filter(e => e.date >= todayStr && e.date <= endDate)
-    .sort((a, b) => a.date.localeCompare(b.date));
-}
 
 // ── SSE broadcast ─────────────────────────────────────────────────────────────
 const sseClients = new Set();
@@ -363,169 +230,12 @@ async function captureScreenshot(filename) {
   }
 }
 
-const BIAS_RANK = { "STRONG BUY":0,"BUY":1,"WATCH":2,"SKIP":3,"AVOID":4,"SELL":5,"STRONG SELL":6 };
-const BEAR_BIASES = new Set(["STRONG SELL","SELL","AVOID"]);
-
-// ── Signal Label Resolution ───────────────────────────────────────────────────
-// Maps raw STRONG SELL bias to a context-aware label.
-// STRONG BUY is unchanged — it is unambiguous in all markets.
-// regime: 'bull' | 'neutral' | 'bear'
-// isHolding: boolean — whether the user has an active position in this sym
-function resolveSignalLabel(bias, regime, isHolding) {
-  if (bias !== 'STRONG SELL') return bias;
-  if (isHolding) {
-    return regime === 'bear' ? 'EXIT NOW' : 'EXIT';
-  }
-  return regime === 'bear' ? 'AVOID' : 'SKIP';
-}
-
-// ── Score velocity: 3-scan linear regression slope ────────────────────────────
-function computeVelocity(hist) {
-  const pts = hist.slice(-3).map(h => h.s);
-  if (pts.length < 2) return { slope: 0, direction: 'stable' };
-  const n = pts.length, mx = (n - 1) / 2;
-  const my = pts.reduce((a, b) => a + b, 0) / n;
-  let num = 0, den = 0;
-  pts.forEach((v, i) => { num += (i - mx) * (v - my); den += (i - mx) ** 2; });
-  const slope = den ? +(num / den).toFixed(2) : 0;
-  const direction = slope >= 0.5 ? 'rising' : slope <= -0.5 ? 'falling' : 'stable';
-  return { slope, direction };
-}
-
-// ── Sector classifier (rule-based, TASI code ranges) ─────────────────────────
-function sectorOf(sym) {
-  const m = sym.match(/(\d+)$/);
-  if (!m) {
-    if (sym.includes('BTC') || sym.includes('ETH') || sym.includes('XRP')) return 'Crypto';
-    if (sym.includes('TVC:') || sym.includes('NYMEX:') || sym.includes('COMEX:')) return 'Commodity';
-    return 'US Equity';
-  }
-  const c = parseInt(m[1]);
-  if (c >= 1010 && c <= 1180 && c < 1200) return 'Banking';
-  if (c === 2222 || c === 2381 || c === 2382) return 'Energy';
-  if ([2080,2082,2083,5110].includes(c)) return 'Utilities';
-  if ([4007,4004,2160,4013,4005,4017,4341,4009,4338].includes(c)) return 'Healthcare';
-  if ([4300,4310,4150,4323].includes(c)) return 'Real Estate';
-  if ([4110,4040,4261,4262,4263,4264].includes(c)) return 'Transport';
-  if ([2280,2050,6002,2281,6070,2270,2100].includes(c) || (c >= 6001 && c <= 6099)) return 'Food & Agri';
-  if (c >= 7000 && c <= 7299) return 'Telecom & Tech';
-  if (c >= 8000 && c <= 8300) return 'Insurance';
-  if (c >= 3000 && c <= 3199) return 'Cement';
-  if ([4190,4180,4003,4200,4260,4001,4006,4050,4051,4163,4240].includes(c)) return 'Retail';
-  if (c >= 2010 && c <= 2399) return 'Petrochem';
-  if (c >= 1200 && c <= 1330) return 'Industrial';
-  if (c >= 1800 && c <= 1840) return 'Consumer';
-  return 'Other';
-}
-
-function getCritPasses(r) {
-  const { ema13, ema34, ema89, ema200 } = r.emas || {};
-  const bear = BEAR_BIASES.has(r.bias);
-  return {
-    emaStack: bear ? (ema13 < ema34 && ema34 < ema89) : (ema13 > ema34 && ema34 > ema89),
-    ema200:   bear ? r.price < ema200 : r.price > ema200,
-    rsi:      bear ? (r.rsi > 22 && r.rsi <= 48) : (r.rsi >= 52 && r.rsi < 78),
-    macd:     bear ? r.macd_hist < 0 : r.macd_hist > 0,
-    vol:      r.vol_ratio >= 1.2,
-    vwap:     r.above_vwap != null ? (bear ? !r.above_vwap : r.above_vwap) : false,
-  };
-}
-
-const CRIT_LABELS = {
-  emaStack: { pts: 2, bull: "EMA stack aligned (13>34>89)", bear: "EMA stack inverted (13<34<89)" },
-  ema200:   { pts: 2, bull: "Price above EMA 200",         bear: "Price below EMA 200" },
-  rsi:      { pts: 2, bull: "RSI in momentum zone (52–78)", bear: "RSI in weak zone (22–48)" },
-  macd:     { pts: 1, bull: "MACD histogram positive",      bear: "MACD histogram negative" },
-  vol:      { pts: 1, bull: "Volume above 1.2×",            bear: "Volume above 1.2×" },
-  vwap:     { pts: 1, bull: "Price above 20-day VWAP",      bear: "Price below 20-day VWAP" },
-};
-
-function computeDelta(newResults, prevResults) {
-  if (!prevResults?.length) return [];
-  const prevMap = new Map(prevResults.map(r => [r.sym, r]));
-  return newResults
-    .map(r => {
-      const prev = prevMap.get(r.sym);
-      if (!prev) return null;
-      const prevRank = BIAS_RANK[prev.bias] ?? 3;
-      const currRank = BIAS_RANK[r.bias] ?? 3;
-      if (prev.bias === r.bias && r.score === prev.score) return null;
-
-      const prevCrit = getCritPasses(prev);
-      const currCrit = getCritPasses(r);
-      const bear = BEAR_BIASES.has(r.bias);
-      const criteria_changes = Object.keys(CRIT_LABELS).map(key => {
-        const was = !!prevCrit[key];
-        const now = !!currCrit[key];
-        if (was === now) return null;
-        const { pts, bull, bear: bearLabel } = CRIT_LABELS[key];
-        return { key, label: bear ? bearLabel : bull, pts, was, now };
-      }).filter(Boolean);
-
-      // Detect rapid direction reversal (e.g. STRONG SELL → BUY in one scan)
-      const prevBearish = BEAR_BIASES.has(prev.bias);
-      const currBearish = BEAR_BIASES.has(r.bias);
-      const prevBullish = ['STRONG BUY','BUY','WATCH'].includes(prev.bias);
-      const currBullish = ['STRONG BUY','BUY','WATCH'].includes(r.bias);
-      const crossed_direction = (prevBearish && currBullish) || (prevBullish && currBearish);
-      const rapid_reversal = crossed_direction && prev.score >= 5;
-
-      // Count consecutive scans in previous direction from score history
-      const hist = state.score_history[r.sym] || [];
-      let prev_streak = 0;
-      for (let i = hist.length - 1; i >= 0; i--) {
-        const h = hist[i];
-        const hBear = BEAR_BIASES.has(h.b);
-        if ((prevBearish && hBear) || (prevBullish && !hBear && !BEAR_BIASES.has(h.b))) {
-          prev_streak++;
-        } else break;
-      }
-
-      const prev_metrics = {
-        rsi:       prev.rsi,
-        macd_hist: prev.macd_hist,
-        vol_ratio: prev.vol_ratio,
-        price:     prev.price,
-        emas:      prev.emas,
-      };
-
-      // Score trajectory over last 3 scans (to show trend direction)
-      const trajectory = hist.slice(-3).map(h => ({ d: h.d, s: h.s, b: h.b }));
-
-      return {
-        sym: r.sym, name: r.name,
-        prev_bias: prev.bias, curr_bias: r.bias,
-        prev_score: prev.score, curr_score: r.score,
-        score_delta: r.score - prev.score,
-        direction: currRank < prevRank ? "improved" : "degraded",
-        criteria_changes,
-        prev_metrics,
-        rapid_reversal,
-        prev_streak,      // how many scans stock was in its previous direction
-        trajectory,       // last 3 scan scores for context
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => Math.abs(b.score_delta) - Math.abs(a.score_delta));
-}
-
 const DEFAULT_UNIVERSE = {
   tasi:      TASI_STOCKS,
   us:        US_EQUITY_STOCKS,
   etf:       ETF_STOCKS,
   crypto:    CRYPTO_STOCKS,
   commodity: COMMODITY_STOCKS,
-};
-
-// ── In-memory state ───────────────────────────────────────────────────────────
-const state = {
-  scan:      { running: false, progress: 0, total: 0, results: [], lastRun: null, error: null, delta: [], currentMarket: "tasi", mode: 'swing', investMode: false, quickScan: false, quickSkipped: 0 },
-  universe:  {},
-  settings:  {},
-  positions: {},
-  virtual:       { cash: 100000, balance_start: 100000, positions: {}, trades: [] },
-  score_history: {},
-  alert_rules:   [],
 };
 
 function loadSettings() {
@@ -604,6 +314,13 @@ async function runValidationGradeThrottled() {
     _valBarsCache.clear();
     const res = await gradePending({ getBars: _valGetBars, universe: TASI_STOCKS.map(s => s.sym) });
     console.log(`[validation] graded ${res.graded}, pending ${res.stillPending}`);
+    // Strategy state machine: force a fresh (uncached) evaluation so AUTO risk-down
+    // transitions persist daily, independent of anyone opening the Lab page.
+    try {
+      const sv = await getStrategyValidation({ ttlMs: 0 });
+      const m = sv.strategies?.[0];
+      if (m) console.log(`[strategy] ${m.id}: ${m.status} (exposure ${m.exposure_mult}, rec ${m.recommendedAction || 'none'})`);
+    } catch (e) { console.warn('[strategy] eval error:', e.message); }
   } catch (e) { console.warn('[validation] grade error:', e.message); }
 }
 
@@ -1213,7 +930,7 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
       // Compute delta vs previous scan
       try {
         const prev = existsSync(PREV_SCAN_CACHE) ? JSON.parse(readFileSync(PREV_SCAN_CACHE, "utf8")) : null;
-        state.scan.delta = computeDelta(results, prev?.results || []);
+        state.scan.delta = computeDelta(results, prev?.results || [], state.score_history);
       } catch (_) { state.scan.delta = []; }
 
       // Telegram notifications
@@ -1254,32 +971,6 @@ function startScan(symbols, market, mode = 'swing', isQuick = false) {
   })();
 
   return { ok: true, message: symbols ? `Scanning ${symbols.length} stocks` : "Scanning all stocks" };
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function json(res, data, status = 200) {
-  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(data));
-}
-
-function html(res, filePath) {
-  try {
-    const content = readFileSync(filePath, "utf8");
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(content);
-  } catch { res.writeHead(404); res.end("Not found"); }
-}
-
-function readBody(req, maxBytes = 1_000_000) {
-  return new Promise((resolve, reject) => {
-    let body = "", size = 0;
-    req.on("data", c => {
-      size += c.length;
-      if (size > maxBytes) { req.destroy(); return reject(new Error('Request body too large')); }
-      body += c;
-    });
-    req.on("end", () => { try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({}); } });
-  });
 }
 
 // ── Google OAuth config (set in .env) ─────────────────────────────────────────
@@ -1737,7 +1428,7 @@ const server = createServer(async (req, res) => {
   if (path === "/api/calendar" && method === "GET") {
     const sym = url.searchParams.get("sym");
     if (!sym) return json(res, { error: "sym required" }, 400);
-    const event = await getEarningsCalendar(sym);
+    const event = await getEarningsCalendar(sym, state.settings?.finnhub_token);
     return json(res, { event });
   }
 
@@ -1839,6 +1530,18 @@ const server = createServer(async (req, res) => {
       await captureScreenshot(filename);
       return json(res, { success: true, url: `/screenshots/${filename}` });
     } catch (err) { return json(res, { success: false, error: err.message }, 500); }
+  }
+
+  // Serve dashboard static assets (css/js split out of index.html)
+  if (path.startsWith("/assets/") && method === "GET") {
+    const filename = path.slice("/assets/".length).replace(/[^a-zA-Z0-9._-]/g, ""); // strip path-traversal
+    const ext = filename.slice(filename.lastIndexOf("."));
+    const TYPES = { ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
+    if (!TYPES[ext]) { res.writeHead(404); return res.end("Not found"); }
+    const fp = join(__dirname, "assets", filename);
+    if (!existsSync(fp)) { res.writeHead(404); return res.end("Not found"); }
+    res.writeHead(200, { "Content-Type": TYPES[ext], "Cache-Control": "no-cache" });
+    return res.end(readFileSync(fp));
   }
 
   // Serve screenshot files
@@ -2535,7 +2238,7 @@ const server = createServer(async (req, res) => {
   // ≥2y-listed, top-quintile 6-1 momentum). Returns current picks, not a backtest.
   if (path === '/api/lab/momentum' && method === 'GET') {
     try {
-      return json(res, await getMomentumScreen());
+      return json(res, await getMomentumScreen({ heldSyms: Object.keys(state.positions || {}) }));
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
   }
 
@@ -2544,6 +2247,29 @@ const server = createServer(async (req, res) => {
     try {
       return json(res, await getBlockDealSignal());
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Strategy validation — graded per rebalance period (the cross-clustering-robust unit).
+  if (path === '/api/lab/strategy' && method === 'GET') {
+    try {
+      return json(res, await getStrategyValidation());
+    } catch(e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
+
+  // Manual promotion (user-confirmed up-transition). Re-checks the gate server-side.
+  if (path === '/api/lab/strategy/promote' && method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const id = body.id;
+      if (!id) return json(res, { ok: false, error: 'id required' }, 400);
+      const val = await getStrategyValidation();
+      const strat = (val.strategies || []).find(s => s.id === id);
+      if (!strat) return json(res, { ok: false, error: 'unknown strategy' }, 404);
+      const { promote } = await import('./strategy_state.mjs');
+      const result = promote(id, strat.evidence);
+      if (result.ok) bustStrategyCache(); // state changed → drop stale validation cache so the Lab reflects it immediately
+      return json(res, result);
+    } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
   }
 
   // Calibration: empirical P(profit) and P(beat buy-and-hold) per signal bucket, with
@@ -2788,7 +2514,7 @@ const server = createServer(async (req, res) => {
 
     // 12. Earnings proximity (requires Finnhub token; auto-passes if no data)
     let earningsEvent = null;
-    try { earningsEvent = await getEarningsCalendar(sym); } catch (_) {}
+    try { earningsEvent = await getEarningsCalendar(sym, state.settings?.finnhub_token); } catch (_) {}
     let earningsOk = true, earningsDays = null, earningsDetail = 'No earnings data available (Finnhub token not set or TASI stock) — skipping';
     if (earningsEvent?.date) {
       earningsDays = Math.round((new Date(earningsEvent.date) - Date.now()) / 864e5);

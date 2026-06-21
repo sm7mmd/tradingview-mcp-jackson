@@ -7,6 +7,21 @@
  * status: 'compliant' | 'non_compliant' | 'review' | 'unknown'
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Authoritative source of truth = Musaffa (AAOIFI), harvested by scripts/harvest_sharia.mjs
+// into dashboard/sharia_data.json. The static COMPLIANCE map below is the FALLBACK for names
+// Musaffa doesn't cover (US equity, commodities) or parse-misses.
+let _musaffa;
+function musaffaData() {
+  if (_musaffa !== undefined) return _musaffa;
+  try { _musaffa = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'sharia_data.json'), 'utf8')).data || {}; }
+  catch { _musaffa = {}; }
+  return _musaffa;
+}
+
 const COMPLIANCE = new Map([
   // ── Fully Islamic banks ──────────────────────────────────────────────────────
   ["TADAWUL:1120", { status: "compliant",     basis: "Full Islamic bank (Al Rajhi) — AAOIFI certified" }],
@@ -262,7 +277,25 @@ const COMPLIANCE = new Map([
 ]);
 
 export function getShariaStatus(sym) {
-  return COMPLIANCE.get(sym) ?? { status: "unknown", basis: "No data — verify with an Islamic finance scholar" };
+  // 1. Authoritative: Musaffa AAOIFI harvest
+  const m = musaffaData()[sym];
+  if (m && m.status && m.status !== "unknown") {
+    const r = m.ratios;
+    const ind = (r && (r.debtRatio != null || r.cashRatio != null))
+      ? ` · approx debt ${r.debtRatio != null ? Math.round(r.debtRatio * 100) + "%" : "—"}, cash ${r.cashRatio != null ? Math.round(r.cashRatio * 100) + "%" : "—"} (indicative)`
+      : "";
+    const srcName = m.source === "muslimxchange" ? "MuslimXchange" : "Musaffa";
+    return {
+      status: m.status,
+      basis: `${srcName} AAOIFI screening${m.asOf ? ` (as of ${m.asOf})` : ""}${ind}`,
+      source: m.source || "musaffa", asOf: m.asOf, label: m.label, ratios: r, flag: m.flag,
+    };
+  }
+  // 2. Fallback: static hand-classified map (US equity, commodities, Musaffa parse-misses)
+  const stat = COMPLIANCE.get(sym);
+  if (stat) return { ...stat, source: "static", basis: stat.basis + (m ? " (Musaffa unavailable — static fallback)" : "") };
+  // 3. Nothing — conservative unknown (excluded from compliant-only screens)
+  return { status: "unknown", basis: "No data — verify with an Islamic finance scholar", source: "none" };
 }
 
 export function getAllStatuses() {
