@@ -294,7 +294,9 @@ function addPosition(){
   const date=document.getElementById('pos-date')?.value||'';
   if(!sym||isNaN(entry)) return;
   const scanRow=scanData.find(r=>r.sym===sym||tickerDisplay(r.sym)===sym);
-  const fullSym=scanRow?.sym||sym;
+  // Normalize a bare 4-digit TASI code → TADAWUL:1120 so it matches scan/momentum keys
+  // (otherwise turnover BUY/HOLD/SELL can never match a hand-entered holding).
+  const fullSym=scanRow?.sym||(/^\d{4}$/.test(sym)?`TADAWUL:${sym}`:sym);
   positionsData[fullSym]={sym:fullSym,name:scanRow?.name||sym,entry_price:entry,shares:isNaN(shares)?null:shares,date};
   document.getElementById('pos-sym').value='';
   document.getElementById('pos-entry').value='';
