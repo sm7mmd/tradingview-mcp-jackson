@@ -2034,136 +2034,78 @@ const server = createServer(async (req, res) => {
   if (path === '/api/goals/suggested' && method === 'GET') {
     try {
     const profile = goalsProfile.get();
-    const results = state.scan.results || [];
-    if (!results.length) return json(res, { suggested: [], reason: 'No scan results — run a scan first' });
-
     const SHARIA_MAP = getAllStatuses();
 
-    // Filter candidates
-    let candidates = results.filter(r => {
-      if (r.bias === 'ERROR' || r.bias === 'NO_DATA' || r.bias === 'SKIP') return false;
-      if (['STRONG SELL','SELL','AVOID'].includes(r.bias)) return false; // goals only show longs for now
-      if (r.score < 4) return false;
-
-      // Market filter
-      const market = r.sym.startsWith('TADAWUL:') ? 'tasi'
-                   : r.sym.includes('USD') || ['BTC','ETH','XRP','SOL'].some(c=>r.sym.includes(c)) ? 'crypto'
-                   : (profile.preferred_markets||[]).includes('us') ? 'us' : null;
-      if (profile.preferred_markets?.length && !profile.preferred_markets.includes(market)) return false;
-
-      // Sharia filter
-      if (profile.sharia_required) {
-        const sh = SHARIA_MAP[r.sym];
-        if (sh && sh.status === 'non_compliant') return false;
-      }
-
-      // Style filter
-      if (profile.style_preference?.length) {
-        const styleTags = r.style_tags || [];
-        const hasStyle = profile.style_preference.some(s => styleTags.includes(s));
-        if (!hasStyle && styleTags.length > 0) return false;
-      }
-
-      return true;
-    });
-
-    // Rank: composite × expected_R × insight_multiplier
-    const insights = accuracyLab.getInsights();
-    const insightMap = {};
-    for (const ins of insights) insightMap[`${ins.style}__${ins.market}`] = ins;
-
-    candidates = candidates.map(r => {
-      const market = r.sym.startsWith('TADAWUL:') ? 'tasi' : 'us';
-      const styleTags = r.style_tags || [];
-      const insightKey = `${styleTags[0]}__${market}`;
-      const insight = insightMap[insightKey];
-      const insightMult = insight?.rating === 'strong' ? 1.3 : insight?.rating === 'weak' ? 0.7 : 1.0;
-      const expectedR = r.atr ? 3.0 : 1.5; // T2 / stop ratio
-      const rankScore = (r.composite || 0) * expectedR * insightMult;
-      return { ...r, _rankScore: rankScore, _market: market };
-    }).sort((a,b) => b._rankScore - a._rankScore);
-
-    // Real open positions — used for slot count and scale-in detection
+    // Real open positions — used for slot count and scale-in detection.
     const realPositions = state.positions || {};
     const openSyms = new Set(Object.keys(realPositions).filter(k => !k.startsWith('_')));
     const openCount = openSyms.size;
     const maxPos = profile.max_open_positions || 5;
     const slotsLeft = Math.max(0, maxPos - openCount);
 
-    // Remove held stocks with weak signals (not worth surfacing)
-    // Keep held stocks with strong signals — they become scale_in suggestions
-    candidates = candidates.filter(r => {
-      const held = openSyms.has(r.sym);
-      if (held && r.score < 7) return false;
-      return true;
-    });
+    // Suggested positions are drawn from the ONE validated edge: the 6-month
+    // momentum × 52-week-high rank combo (gate t 3.38, OOS 9/9 positive years).
+    // The old 9-pt score ranker had no edge (~37% win rate) — retired here so
+    // "Enter Now" means the actual momentum buy-list, not a noise signal.
+    const mom = await getMomentumScreen({ heldSyms: [...openSyms] });
+    if (!mom.success) {
+      return json(res, { suggested: [], reason: mom.error || 'Momentum screen unavailable',
+        note: 'Bars cache may be cold — run: node scripts/bars_cache.mjs warm' });
+    }
 
-    // Top 9 candidates with trade plan
-    const suggested = candidates.slice(0, 9).map(r => {
-      const isBear = false; // goals only show longs
-      const alreadyHeld = openSyms.has(r.sym);
+    // Enrich each momentum holding with live scan context (ATR for stop/target
+    // geometry, style tags, indicator notes) when the symbol is in the last scan.
+    const scanMap = {};
+    for (const s of (state.scan.results || [])) scanMap[s.sym] = s;
 
-      // Tier — held strong signal → scale_in; otherwise normal tiers
-      const tier = alreadyHeld ? 'scale_in'
-                 : r.score >= 7 ? 'enter'
-                 : r.score >= 5 ? 'watch'
-                 : 'monitor';
-      // scale_in: only add remaining half (assume first half already deployed)
-      const tierRiskMult = tier === 'enter' ? 1.0 : tier === 'watch' ? 0.5 : tier === 'scale_in' ? 0.5 : 0;
+    const suggested = (mom.holdings || []).slice(0, 9).map(h => {
+      const sc = scanMap[h.sym] || {};
+      const price = h.price;
+      const alreadyHeld = openSyms.has(h.sym);
+      // Momentum holdings ARE the buy-list — every name is an "enter" (held →
+      // scale_in for the remaining half). No score-based watch/monitor tiers.
+      const tier = alreadyHeld ? 'scale_in' : 'enter';
+      const tierRiskMult = alreadyHeld ? 0.5 : 1.0;
 
-      const stop = r.atr ? r.price - 1.5 * r.atr : null;
-      const t1   = r.atr ? r.price + 1.5 * r.atr : null;
-      const t2   = r.atr ? r.price + 3.0 * r.atr : null;
+      // Stop/target geometry: prefer ATR from the scan; fall back to a fixed %
+      // envelope (≈2:1 reward:risk) when ATR isn't available for this name.
+      const atr = sc.atr || null;
+      const stop = atr ? price - 1.5 * atr : +(price * 0.97).toFixed(2);
+      const t1   = atr ? price + 1.5 * atr : +(price * 1.045).toFixed(2);
+      const t2   = atr ? price + 3.0 * atr : +(price * 1.09).toFixed(2);
+
       const riskAmt = profile.capital_sar * (profile.risk_per_trade_pct / 100) * tierRiskMult;
-      const shares  = tier !== 'monitor' && stop && r.price > stop ? Math.floor(riskAmt / (r.price - stop)) : null;
-      const positionValue = shares ? shares * r.price : null;
-      const t2Gain  = shares && t2 ? Math.round(shares * (t2 - r.price)) : null;
+      const shares  = stop && price > stop ? Math.floor(riskAmt / (price - stop)) : null;
+      const positionValue = shares ? shares * price : null;
+      const t2Gain  = shares && t2 ? Math.round(shares * (t2 - price)) : null;
       const t2Pct   = t2Gain && profile.capital_sar ? +(t2Gain / profile.capital_sar * 100).toFixed(1) : null;
       const targetGain = profile.capital_sar * (profile.target_return_pct / 100);
       const contributionPct = t2Gain && targetGain ? +(t2Gain / targetGain * 100).toFixed(1) : null;
 
-      // Why this stock matches — phrasing shifts by tier
-      const styleDescEnter = {
-        Momentum: 'strong near-term momentum — RSI in sweet zone, MACD confirming, volume backing it',
-        Trend: 'clean trend structure — EMA stack aligned with long-term uptrend, Hurst shows persistence',
-        Breakout: 'volume breakout — heavy volume surge with RS leadership vs the index',
-        Recovery: 'RSI recovery building — oscillator climbing while price stabilizes, early reversal signs',
-        Pullback: 'healthy pullback — touching EMA34 support in an intact uptrend, asymmetric entry risk',
-      };
-      const styleDescWatch = {
-        Momentum: 'momentum building — RSI climbing toward sweet zone, MACD approaching cross, awaiting volume confirmation',
-        Trend: 'trend forming — EMA stack partially aligned, Hurst trending, watch for score 7 confirmation',
-        Breakout: 'approaching resistance — price nearing key level, watch for volume surge before entering',
-        Recovery: 'early recovery signs — oscillator curling up, price stabilizing, not yet fully confirmed',
-        Pullback: 'pullback developing — EMA34 nearby, wait for bounce confirmation before entering',
-      };
-      const styleDescMonitor = {
-        Momentum: 'early momentum signals emerging — indicators beginning to align, no capital yet',
-        Trend: 'potential trend building — EMA stack starting to form, monitor for further development',
-        Breakout: 'pre-breakout consolidation — watch for volume surge confirmation before any entry',
-        Recovery: 'bottoming process underway — watch for oscillator curl and price stabilization',
-        Pullback: 'pullback in progress — wait for EMA support test and bounce before considering entry',
-      };
-      const descMap = (tier === 'enter' || tier === 'scale_in') ? styleDescEnter : tier === 'watch' ? styleDescWatch : styleDescMonitor;
-      const primaryStyle = (r.style_tags || [])[0] || 'Swing';
-      const why = descMap[primaryStyle] || 'multiple criteria aligned';
+      // Why this name is on the buy-list — momentum-specific, not the 9-pt score.
+      const wk52Txt = h.wk52 != null ? `, trading at ${h.wk52}% of its 52-week high` : '';
+      const why = `6-month momentum +${h.mom6}%${wk52Txt} — rank #${h.rank} in the validated momentum × 52-week-high combo (the one tested edge). ${alreadyHeld ? 'Already held; signal still in the top quintile.' : 'Buy at the next monthly rebalance.'}`;
 
       return {
-        sym: r.sym, name: r.name, ar: r.ar,
-        bias: r.bias, score: r.score, maxScore: r.maxScore,
-        composite: r.composite, style_tags: r.style_tags, price: r.price,
+        sym: h.sym, name: h.name, ar: sc.ar,
+        // bias drives the trend-state badge; momentum names are uptrends by construction.
+        bias: sc.bias || 'STRONG BUY', score: sc.score ?? null, maxScore: sc.maxScore || 9,
+        mom6: h.mom6, wk52: h.wk52, momRank: h.rank,
+        style_tags: sc.style_tags || ['Momentum'], price,
         stop, t1, t2, shares, positionValue,
         t2Gain, t2Pct, contributionPct,
-        rsi: r.rsi, atr: r.atr, atr_pct_rank: r.atr_pct_rank, hurst: r.hurst,
-        above_vwap: r.above_vwap, weekly: r.weekly,
-        sharia: SHARIA_MAP[r.sym] || null,
-        why, primaryStyle,
+        rsi: sc.rsi, atr, atr_pct_rank: sc.atr_pct_rank, hurst: sc.hurst,
+        above_vwap: sc.above_vwap, weekly: sc.weekly,
+        sharia: SHARIA_MAP[h.sym] || (h.sharia ? { status: 'compliant', basis: h.sharia } : null),
+        why, primaryStyle: (sc.style_tags || [])[0] || 'Momentum',
         tier, tierRiskMult, alreadyHeld,
-        rankScore: Math.round(r._rankScore),
       };
     });
 
-    return json(res, { suggested, profile, total_candidates: candidates.length, open_positions: openCount, slots_left: slotsLeft });
+    return json(res, { suggested, profile,
+      total_candidates: mom.universe?.liquid || (mom.holdings || []).length,
+      ranker: 'momentum-combo', asOf: mom.asOf, nextRebalance: mom.nextRebalance,
+      open_positions: openCount, slots_left: slotsLeft });
     } catch(e) { return json(res, { error: e.message, suggested: [] }, 500); }
   }
 

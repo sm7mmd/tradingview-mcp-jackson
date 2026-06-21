@@ -323,7 +323,7 @@ function renderGoalsPanel(sugRes) {
 <!-- Suggested Positions -->
 <div class="goal-section-title" style="margin-bottom:8px">
   ✨ Suggested Positions
-  <span style="font-weight:400;font-size:10px;color:var(--text3);margin-inline-start:6px">${sugRes?.total_candidates||0} candidates matched · showing top 6 · ranked by composite score × expected R × historical accuracy</span>
+  <span style="font-weight:400;font-size:10px;color:var(--text3);margin-inline-start:6px">${sugRes?.total_candidates||0} liquid Sharia names screened · top quintile · ranked by the validated 6-month-momentum × 52-week-high combo (the one tested edge)${sugRes?.nextRebalance?` · next rebalance ${sugRes.nextRebalance}`:''}</span>
   <button class="btn btn-secondary" style="font-size:10px;padding:3px 10px;margin-inline-start:10px" onclick="loadGoalsPanel()">↻ Refresh</button>
 </div>
 ${!goalsSuggested.length ? `<div class="suggested-empty"><div style="font-size:32px;margin-bottom:8px">🔍</div>Run a scan first, then come back to see personalized suggestions.<br><button class="btn btn-primary" style="margin-top:10px" onclick="switchTab('screener',document.querySelector('.tab'));startScan()">Run Scan</button></div>`
@@ -339,7 +339,7 @@ ${!goalsSuggested.length ? `<div class="suggested-empty"><div style="font-size:3
     : '';
   const tiers = [
     { key:'scale_in', label:'🔄 Scale In',           sub:'Already held · signal still strong — consider adding to position' },
-    { key:'enter',    label:'🟢 Enter Now',           sub:'Full size — deploy capital at next open' },
+    { key:'enter',    label:'🟢 Buy List',            sub:'Top-quintile momentum name — buy at the next monthly rebalance' },
     { key:'watch',    label:'🟡 Watch — Building',   sub:'Half size — add second half when score hits 7' },
     { key:'monitor',  label:'🔵 Monitor — Early',    sub:'No capital yet — watch for score 5+ to upgrade' },
   ];
@@ -361,7 +361,7 @@ function buildSuggestedCard(r) {
   const atrNote   = r.atr_pct_rank!=null ? (r.atr_pct_rank<=20?'Coiling ⭐':r.atr_pct_rank>=80?'Volatile ⚠':'Normal vol') : '';
   const shariaHtml = r.sharia?.status === 'compliant' ? '<span style="font-size:9px;color:var(--green);font-weight:700">Sharia ✓</span>' : '';
   const tier = r.tier || 'enter';
-  const tierBadgeMap = { enter:'🟢 Enter Now', watch:'🟡 Watch — Building', monitor:'🔵 Monitor — Early', scale_in:'🔄 Scale In — Add to Position' };
+  const tierBadgeMap = { enter:'🟢 Buy List', watch:'🟡 Watch — Building', monitor:'🔵 Monitor — Early', scale_in:'🔄 Scale In — Add to Position' };
   const tierBadge = `<span class="tier-badge ${tier}">${tierBadgeMap[tier]||tier}</span>`;
   const sizeNote = tier === 'watch'
     ? `<div class="tier-size-note">Half size — enter at 0.75% risk, add second half if score reaches 7</div>`
