@@ -6,6 +6,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { decide, gateMet, exposureFor, CFG, promote, evaluate, getState, transitions } from '../dashboard/strategy_state.mjs';
+import { ingestIndexEvents, getIndexEvents, indexEventsSummary } from '../dashboard/index_events.mjs';
 import { db } from '../dashboard/db.js';
 
 // baseline evidence that PASSES the promotion gate
@@ -149,5 +150,28 @@ describe('persistence wiring (DB round-trip)', () => {
     assert.equal(s.exposure_mult, 0.5);
     const log = transitions(TID, 5);
     assert.ok(log.some(t => t.from_state === 'promoted' && t.to_state === 'decaying' && t.actor === 'auto'));
+  });
+});
+
+describe('index_events ingest', () => {
+  it('ingests valid add/delete events, rejects bad rows, dedups re-runs', () => {
+    const rows = [
+      { code: '1120', action: 'add',    review: '2019-05', announce_date: '2019-05-14', effective_date: '2019-05-28', index: 'MSCI Saudi', source: 'test' },
+      { code: '2222', action: 'delete', review: '2024-11', announce_date: '2024-11-06', effective_date: '2024-11-25', index: 'MSCI Saudi', source: 'test' },
+      { code: 'XX',   action: 'add',    review: '2019-05', announce_date: '2019-05-14', effective_date: '2019-05-28', index: 'MSCI Saudi', source: 'test' }, // bad code
+      { code: '1120', action: 'sideways', review: '2019-05', announce_date: '2019-05-14', effective_date: '2019-05-28', index: 'MSCI Saudi', source: 'test' }, // bad action
+      { code: '1120', action: 'add',    review: '2019-05', announce_date: '2019/05/14', effective_date: 'nope',       index: 'MSCI Saudi', source: 'test' }, // bad date
+    ];
+    const r1 = ingestIndexEvents(rows);
+    assert.equal(r1.inserted, 2, `expected 2 inserted, got ${r1.inserted}`);
+    assert.equal(r1.skipped, 3, `expected 3 skipped, got ${r1.skipped}`);
+    // re-run is idempotent
+    const r2 = ingestIndexEvents(rows);
+    assert.equal(r2.inserted, 0, 'second ingest should insert nothing (UNIQUE dedup)');
+
+    const adds = getIndexEvents({ action: 'add' });
+    assert.ok(adds.some(e => e.sym === 'TADAWUL:1120' && e.effective_date === '2019-05-28'));
+    const sum = indexEventsSummary();
+    assert.ok(sum.total >= 2 && sum.adds >= 1 && sum.deletes >= 1, JSON.stringify(sum));
   });
 });
