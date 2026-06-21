@@ -33,6 +33,14 @@ Momentum equal-weight remained the strongest return engine in every test.
 
 The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date. Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
 
+**CLI: `npm run decision`** — the same monthly call without the dashboard server. Prints state → sizing → account split → next rebalance → BUY/HOLD/SELL with live prices, momentum, ~share counts, and ⚠ debt-≥50% flags. Flags:
+- `--acct N` — account size for SAR sizing (default 100k)
+- `--json` — machine-readable (implies `--quiet`); for `clean | jq` use `npm run --silent decision -- --json` or call node directly
+- `--quiet` — mute the db boot log
+- `--held "1120,2222"` — what-if HOLD/SELL vs a hypothetical book (ignores DB)
+
+Pure helpers (`normalizeHeld`, `computeTurnover`, `sarPerName`) unit-tested incl. the `--held`→turnover path.
+
 ## Open threads (require user action)
 
 - **Contract-flow confirmation** — run the headed harvester to backfill 2024–2025 contracts and re-power the n=22 lead:
@@ -41,4 +49,4 @@ The Signals/Momentum tab is now a monthly decision: strategy-state badge → Sch
 
 ## Tests
 
-Full runnable suite green: `test:unit` 29 · `test:strategy` 23 · `test:money` 104. (e2e needs a live TradingView CDP session; not run here.)
+Full runnable suite green: `test:unit` 29 · `test:strategy` 23 · `test:money` 110. (e2e needs a live TradingView CDP session; not run here.)
