@@ -44,8 +44,10 @@ async function main() {
   page.on('pageerror', e => errors.push({ tab: cur, text: 'PAGEERROR: ' + e.message }));
 
   let cur = 'load';
-  await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(1500);
+  // Not 'networkidle' — the SSE /api/events stream stays open, so the network
+  // never goes idle and the wait would time out. Use domcontentloaded + a settle.
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2000);
   // confirm we're past the gate (avatar present, gate hidden)
   const loggedIn = await page.evaluate(() => !!document.querySelector('#user-avatar-btn') || !document.querySelector('#mwj-submit-btn')?.offsetParent);
   console.log(`auth gate passed: ${loggedIn ? 'YES' : 'NO (still on login)'}`);
