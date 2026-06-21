@@ -16,6 +16,7 @@ import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
+import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -571,5 +572,32 @@ describe('index_flow helpers', () => {
     assert.equal(sliceByDate(dates, '2024-01-02'), 1);   // next on-or-after
     assert.equal(sliceByDate(dates, '2024-01-06'), -1);  // past end
     assert.equal(sliceByDate(dates, '2023-12-31'), 0);   // before start → first
+  });
+});
+
+// ── pead helpers (pure) ───────────────────────────────────────────────────────
+describe('pead helpers', () => {
+  it('quantileBreakpoints returns 4 ascending cut points', () => {
+    const bp = quantileBreakpoints([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.equal(bp.length, 4);
+    for (let i = 1; i < bp.length; i++) assert.ok(bp[i] >= bp[i - 1], `not ascending: ${bp}`);
+  });
+  it('assignQuintile buckets by breakpoints', () => {
+    const bp = [2, 4, 6, 8]; // 5 buckets: <=2 | <=4 | <=6 | <=8 | >8
+    assert.equal(assignQuintile(1, bp), 0);
+    assert.equal(assignQuintile(2, bp), 0);   // boundary lands in lower bucket
+    assert.equal(assignQuintile(3, bp), 1);
+    assert.equal(assignQuintile(7, bp), 3);
+    assert.equal(assignQuintile(9, bp), 4);
+  });
+  it('assignQuintile spans all 5 buckets across a sample', () => {
+    const vals = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    const bp = quantileBreakpoints(vals);
+    const buckets = new Set(vals.map(v => assignQuintile(v, bp)));
+    assert.ok(buckets.size === 5, `expected 5 buckets, got ${[...buckets]}`);
+  });
+  it('mean averages a numeric array, NaN on empty', () => {
+    assert.equal(peadMean([2, 4, 6]), 4);
+    assert.ok(Number.isNaN(peadMean([])));
   });
 });
