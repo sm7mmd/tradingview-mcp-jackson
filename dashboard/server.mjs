@@ -28,6 +28,7 @@ import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 import { json, html, readBody } from "./http_util.mjs";
+import { state } from "./state.mjs";
 import { sendTelegram } from "./notify.mjs";
 import { getUpcomingEvents } from "./macro.mjs";
 import { fetchGoogleNews, getEarningsCalendar, newsCache, NEWS_TTL } from "./news.mjs";
@@ -235,17 +236,6 @@ const DEFAULT_UNIVERSE = {
   etf:       ETF_STOCKS,
   crypto:    CRYPTO_STOCKS,
   commodity: COMMODITY_STOCKS,
-};
-
-// ── In-memory state ───────────────────────────────────────────────────────────
-const state = {
-  scan:      { running: false, progress: 0, total: 0, results: [], lastRun: null, error: null, delta: [], currentMarket: "tasi", mode: 'swing', investMode: false, quickScan: false, quickSkipped: 0 },
-  universe:  {},
-  settings:  {},
-  positions: {},
-  virtual:       { cash: 100000, balance_start: 100000, positions: {}, trades: [] },
-  score_history: {},
-  alert_rules:   [],
 };
 
 function loadSettings() {
