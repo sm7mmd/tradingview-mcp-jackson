@@ -25,9 +25,13 @@ Four upside layers tested under OOS-aware discipline:
 | #1 Compounding-geometry sizing (vol-target / conviction / drawdown-brake) | **All killed** — walk-forward refuted the brake (insurance, not edge) |
 | #2 Flow / MSCI-rebalance front-running | **NO SIGNAL** — move is spent before the public announcement |
 | #3 PEAD (earnings-drift) | **NO SIGNAL** — drift U-shaped, not monotonic; season-OOS flips |
-| #4 Govt / Vision-2030 contract-flow | **LIVE LEAD, underpowered** — +4.15% net/20d, NW-t 2.11, beats private, but n=22 (single 4-mo window) |
+| #4 Govt / Vision-2030 contract-flow | **CONFIRMED (2nd edge)** — full-history harvest grew n=22→375; net drift +1.15%/20d, NW-t 2.94, beats private control, trim-one stable. Effect shrank from the n=22 estimate (+4.15% was small-sample inflation). |
 
-Momentum equal-weight remained the strongest return engine in every test.
+Momentum equal-weight remained the strongest return engine in every test; govt contract-flow is a modest event overlay on top.
+
+### Govt contract-flow — confirmed 2026-06-21
+
+When a company wins a **government / Vision-2030 contract**, its stock drifts ~**+1.15%** over the next 20 trading days, net of cost — statistically solid (NW-t 2.94, n=375, trim-stable, and private-sector contracts show no such drift = the control). Unlocked by cracking the saudiexchange.sa harvest (JSON endpoint called in-page, bypasses Akamai + reCAPTCHA; `harvest_catalysts.mjs` rewritten around it). Contracts in DB 207→2,392 (2021→2026). Modest but real; not yet wired into the dashboard (decision pending).
 
 ## Decision view (shipped)
 
@@ -43,9 +47,8 @@ Pure helpers (`normalizeHeld`, `computeTurnover`, `sarPerName`) unit-tested incl
 
 ## Open threads (require user action)
 
-- **Contract-flow confirmation** — run the headed harvester to backfill 2024–2025 contracts and re-power the n=22 lead:
-  `HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs --from 2024-01-01 --to 2025-12-31 --pages 400` (or `--pause`), then `node --experimental-sqlite scripts/contract_flow_test.mjs`.
-- **Operate it** — trade the monthly picks on Derayah, log positions back, build a live track record.
+- **Contract-flow ✅ CONFIRMED** (2026-06-21) — full 5-year harvest powered n=22→375, verdict SIGNAL. Re-harvest top-up any time: `HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs` (full history) or `--period "1 month"` (daily). Open sub-decision: wire it into the dashboard as a contract-flow signal/overlay, or leave as a research result.
+- **Operate it** — trade the monthly picks on Derayah (`npm run decision`), log positions back, build a live track record.
 
 ## Tests
 
