@@ -9,6 +9,8 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { scoreBias, computeSeasonality, volumeCheck, detectDivergence, findSRLevels,
   calcMFI, calcOBVTrend, calcVolumeZScore, calcHurst, calcATRPercentileRank, computeStyleTags } from '../scripts/tasi_screener.mjs';
+import { tickerDisplay, resolveSignalLabel, computeVelocity, sectorOf, getCritPasses, computeDelta } from '../dashboard/signal_format.mjs';
+import { getUpcomingEvents } from '../dashboard/macro.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
@@ -381,5 +383,112 @@ describe('computeStyleTags — setup classification', () => {
       emas: { ema13: 110, ema34: 105, ema89: 100, ema200: 90 }, price: 115, hurst: 0.6, rs_score: 2.0,
       rsi_buildup: { is_building: true } });
     assert.ok(tags.length <= 2, JSON.stringify(tags));
+  });
+});
+
+// ════════════════ Extracted server helpers (signal_format.mjs, macro.mjs) ════════════════
+
+describe('tickerDisplay — strip exchange prefix', () => {
+  it('strips EXCHANGE: prefix', () => assert.equal(tickerDisplay('TADAWUL:1120'), '1120'));
+  it('passes through a bare symbol', () => assert.equal(tickerDisplay('AAPL'), 'AAPL'));
+});
+
+describe('resolveSignalLabel — context-aware STRONG SELL', () => {
+  it('non-STRONG-SELL passes through unchanged', () => {
+    assert.equal(resolveSignalLabel('BUY', 'bull', false), 'BUY');
+    assert.equal(resolveSignalLabel('STRONG BUY', 'bear', true), 'STRONG BUY');
+  });
+  it('holding + bear → EXIT NOW', () => assert.equal(resolveSignalLabel('STRONG SELL', 'bear', true), 'EXIT NOW'));
+  it('holding + non-bear → EXIT', () => assert.equal(resolveSignalLabel('STRONG SELL', 'bull', true), 'EXIT'));
+  it('not holding + bear → AVOID', () => assert.equal(resolveSignalLabel('STRONG SELL', 'bear', false), 'AVOID'));
+  it('not holding + non-bear → SKIP', () => assert.equal(resolveSignalLabel('STRONG SELL', 'neutral', false), 'SKIP'));
+});
+
+describe('computeVelocity — 3-scan slope', () => {
+  it('rising scores → rising', () => {
+    const r = computeVelocity([{ s: 1 }, { s: 2 }, { s: 3 }]);
+    assert.equal(r.direction, 'rising'); assert.ok(r.slope >= 0.5);
+  });
+  it('falling scores → falling', () => {
+    const r = computeVelocity([{ s: 3 }, { s: 2 }, { s: 1 }]);
+    assert.equal(r.direction, 'falling'); assert.ok(r.slope <= -0.5);
+  });
+  it('flat → stable', () => assert.deepEqual(computeVelocity([{ s: 5 }, { s: 5 }]), { slope: 0, direction: 'stable' }));
+  it('<2 points → stable, slope 0', () => assert.deepEqual(computeVelocity([{ s: 4 }]), { slope: 0, direction: 'stable' }));
+});
+
+describe('sectorOf — TASI code-range classifier', () => {
+  it('banking range', () => assert.equal(sectorOf('1120'), 'Banking'));
+  it('energy (Aramco 2222)', () => assert.equal(sectorOf('2222'), 'Energy'));
+  it('telecom & tech range', () => assert.equal(sectorOf('7010'), 'Telecom & Tech'));
+  it('cement range', () => assert.equal(sectorOf('3010'), 'Cement'));
+  it('crypto by name', () => assert.equal(sectorOf('BINANCE:BTCUSDT'), 'Crypto'));
+  it('US equity fallback (no digits)', () => assert.equal(sectorOf('AAPL'), 'US Equity'));
+});
+
+describe('getCritPasses — bull vs bear criteria', () => {
+  const bull = { bias: 'BUY', emas: { ema13: 110, ema34: 105, ema89: 100, ema200: 90 }, price: 115, rsi: 60, macd_hist: 0.5, vol_ratio: 2.0, above_vwap: true };
+  const bear = { bias: 'SELL', emas: { ema13: 90, ema34: 95, ema89: 100, ema200: 110 }, price: 85, rsi: 35, macd_hist: -0.5, vol_ratio: 2.0, above_vwap: false };
+  it('full bull setup passes every bull criterion', () => {
+    const c = getCritPasses(bull);
+    assert.deepEqual(c, { emaStack: true, ema200: true, rsi: true, macd: true, vol: true, vwap: true });
+  });
+  it('full bear setup passes every bear criterion (mirrored)', () => {
+    const c = getCritPasses(bear);
+    assert.deepEqual(c, { emaStack: true, ema200: true, rsi: true, macd: true, vol: true, vwap: true });
+  });
+  it('low volume fails the vol gate', () => assert.equal(getCritPasses({ ...bull, vol_ratio: 1.0 }).vol, false));
+});
+
+describe('computeDelta — scan-to-scan change detection', () => {
+  const emas = { ema13: 110, ema34: 105, ema89: 100, ema200: 90 };
+  const base = { emas, price: 115, rsi: 60, macd_hist: 0.5, vol_ratio: 2.0, above_vwap: true };
+  it('no previous results → empty', () => { assert.deepEqual(computeDelta([{ sym: 'X', ...base, bias: 'BUY', score: 6 }], [], {}), []); });
+  it('unchanged bias+score → excluded', () => {
+    const cur = [{ sym: 'X', name: 'X', ...base, bias: 'BUY', score: 6 }];
+    const prev = [{ sym: 'X', name: 'X', ...base, bias: 'BUY', score: 6 }];
+    assert.deepEqual(computeDelta(cur, prev, {}), []);
+  });
+  it('improved bias is reported with positive delta + direction improved', () => {
+    const cur = [{ sym: 'X', name: 'X', ...base, bias: 'BUY', score: 6 }];
+    const prev = [{ sym: 'X', name: 'X', ...base, bias: 'WATCH', score: 4 }];
+    const d = computeDelta(cur, prev, {});
+    assert.equal(d.length, 1);
+    assert.equal(d[0].direction, 'improved');
+    assert.equal(d[0].score_delta, 2);
+  });
+  it('a symbol absent from prev is skipped', () => {
+    const cur = [{ sym: 'NEW', name: 'NEW', ...base, bias: 'BUY', score: 6 }];
+    const prev = [{ sym: 'OTHER', name: 'OTHER', ...base, bias: 'BUY', score: 6 }];
+    assert.deepEqual(computeDelta(cur, prev, {}), []);
+  });
+  it('results sorted by absolute score delta desc', () => {
+    const cur = [
+      { sym: 'A', name: 'A', ...base, bias: 'BUY', score: 5 },
+      { sym: 'B', name: 'B', ...base, bias: 'STRONG BUY', score: 9 },
+    ];
+    const prev = [
+      { sym: 'A', name: 'A', ...base, bias: 'WATCH', score: 4 },   // delta 1
+      { sym: 'B', name: 'B', ...base, bias: 'WATCH', score: 3 },   // delta 6
+    ];
+    const d = computeDelta(cur, prev, {});
+    assert.equal(d[0].sym, 'B');   // bigger abs delta first
+    assert.equal(d[1].sym, 'A');
+  });
+});
+
+describe('getUpcomingEvents — date-window filter', () => {
+  it('returns only events within [today, today+days], sorted ascending', () => {
+    const days = 400;
+    const nowKSA = new Date(Date.now() + 3 * 3600 * 1000);
+    const todayStr = nowKSA.toISOString().slice(0, 10);
+    const endStr = new Date(nowKSA.getTime() + days * 86400 * 1000).toISOString().slice(0, 10);
+    const ev = getUpcomingEvents(days);
+    for (const e of ev) { assert.ok(e.date >= todayStr && e.date <= endStr, `out of window: ${e.date}`); }
+    const dates = ev.map(e => e.date);
+    assert.deepEqual(dates, [...dates].sort((a, b) => a.localeCompare(b)));
+  });
+  it('a wider window returns at least as many events as a narrow one', () => {
+    assert.ok(getUpcomingEvents(400).length >= getUpcomingEvents(7).length);
   });
 });
