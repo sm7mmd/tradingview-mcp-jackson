@@ -22,7 +22,8 @@
     "test:cli": "node --test tests/cli.test.js",
     "test:strategy": "node --experimental-sqlite --test tests/strategy_state.test.js",
     "test:money": "node --experimental-sqlite --test tests/moneypath.test.js",
-    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
+    "test:honesty": "node --test tests/honesty.test.js",
+    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js tests/honesty.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
   },
