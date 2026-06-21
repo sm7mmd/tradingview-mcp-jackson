@@ -91,7 +91,7 @@ function get360WhalePillar(r) {
   const cmaTxt = cmaConfirmed
     ? (cmaNet > 0 ? `CMA: ${cmaBuyCount}× confirmed buy` : cmaNet < 0 ? `CMA: ${cmaSellCount}× confirmed sell` : 'CMA filing exists')
     : '';
-  const sub    = [mfiTxt, obvTxt, dealTxt, cmaTxt].filter(Boolean).join(' · ') || 'No institutional data';
+  const sub    = [mfiTxt, obvTxt, dealTxt, cmaTxt].filter(Boolean).join(' · ') || 'No volume-flow data';
 
   return { bull, bear, neutral:!bull&&!bear, col, pct, signal: signal + cmaLabel, sub,
            dealVal, deals, priceDiff, dealAccum, dealDist, dealNote, dealBullish, dealBearish,
@@ -133,46 +133,46 @@ function generate360Synthesis(r, tech, fund, whale) {
   let headline, body, action;
 
   if (bullCount === 3) {
-    headline = 'Full alignment — all three dimensions confirm bullish';
-    body = `Technical momentum is confirmed (${r.score}/8), the stock is ${fund.signal.toLowerCase()} on fundamentals, and institutional flow shows ${whale.signal.toLowerCase()} (${whale.sub}). This rare three-way convergence is the strongest trend-alignment state — descriptive, not a buy signal (the 9-pt score lagged buy-and-hold in testing). Validated buy-list = Momentum tab.${bdCtx()}`;
-    action = `<strong>Consider entry</strong> near EMA 34 (${r.emas?.ema34?.toFixed(2)??'—'}). Both ATR-based and EMA 89 structure stops are valid. Preferred target: T2 at 2:1 R:R.`;
+    headline = 'Full alignment — all three dimensions in an uptrend';
+    body = `Technical momentum is present (${r.score}/8), the stock is ${fund.signal.toLowerCase()} on fundamentals, and volume flow (MFI/OBV) shows ${whale.signal.toLowerCase()} (${whale.sub}). This rare three-way convergence is the strongest trend-alignment state — descriptive, not a buy signal (the 9-pt score lagged buy-and-hold in testing). Validated buy-list = Momentum tab.${bdCtx()}`;
+    action = `<strong>Strongest trend-alignment state</strong> — descriptive, not a buy trigger (this score had no validated edge). If you do trade it, EMA 34 (${r.emas?.ema34?.toFixed(2)??'—'}) and ATR / EMA 89 are reasonable stop references. Validated buy-list = Momentum tab.`;
   } else if (bearCount === 3) {
     headline = 'Full alignment — all three dimensions confirm bearish';
-    body = `Technicals are deteriorating (${r.score}/8 bearish), fundamentals score ${fund.pct}/100 (${fund.signal.toLowerCase()}), and institutional flow shows ${whale.signal.toLowerCase()} (${whale.sub}). Strong multi-dimensional bear case.${bdCtx()}`;
+    body = `Technicals are deteriorating (${r.score}/8 bearish), fundamentals score ${fund.pct}/100 (${fund.signal.toLowerCase()}), and volume flow (MFI/OBV) shows ${whale.signal.toLowerCase()} (${whale.sub}). Strong multi-dimensional bear case.${bdCtx()}`;
     action = `<strong>Avoid new long positions.</strong> If holding, consider exiting on any bounce toward EMA 34 (${r.emas?.ema34?.toFixed(2)??'—'}).`;
   } else if (bullCount === 2 && !fund.loading) {
-    const missing = tech.neutral?'a technical breakout':fund.neutral?'fundamental value':whale.neutral?'institutional accumulation':'full alignment';
+    const missing = tech.neutral?'a technical breakout':fund.neutral?'fundamental value':whale.neutral?'volume-flow confirmation':'full alignment';
     headline = `Two pillars aligned bullish — awaiting ${missing}`;
-    body = `Technical score ${r.score}/8, fundamentals ${fund.signal.toLowerCase()} (${fund.pct}/100), institutional ${whale.signal.toLowerCase()} (${whale.sub}). Two of three dimensions support a bullish view.${bdCtx()}`;
-    action = `<strong>Entry possible at reduced size.</strong> Add once ${missing} confirms. Use tighter stop at 1× ATR.`;
+    body = `Technical score ${r.score}/8, fundamentals ${fund.signal.toLowerCase()} (${fund.pct}/100), volume flow ${whale.signal.toLowerCase()} (${whale.sub}). Two of three dimensions lean bullish.${bdCtx()}`;
+    action = `<strong>Partial trend alignment</strong> (two pillars). Descriptive only, not a buy signal. If trading, smaller size + a tighter 1× ATR stop fit the unconfirmed risk. Validated buy-list = Momentum tab.`;
   } else if (bearCount === 2 && !fund.loading) {
-    const missing = tech.neutral?'technical breakdown':fund.neutral?'fundamental weakness':whale.neutral?'institutional distribution':'full alignment';
+    const missing = tech.neutral?'technical breakdown':fund.neutral?'fundamental weakness':whale.neutral?'volume-flow breakdown':'full alignment';
     headline = `Two pillars aligned bearish — ${missing} pending`;
-    body = `Risk is elevated with two of three dimensions bearish. Technical ${tech.signal}, fundamentals ${fund.signal.toLowerCase()}, institutional ${whale.signal.toLowerCase()}.${bdCtx()}`;
+    body = `Risk is elevated with two of three dimensions bearish. Technical ${tech.signal}, fundamentals ${fund.signal.toLowerCase()}, volume flow ${whale.signal.toLowerCase()}.${bdCtx()}`;
     action = `<strong>Avoid.</strong> Wait for the third pillar to confirm before any contrarian entry.`;
   } else if (tech.bull && fund.bull && whale.neutral && !fund.loading) {
-    headline = 'Technical + Fundamental aligned, institutions not yet confirmed';
-    body = `Strong price action (${r.score}/8) on a ${fund.signal.toLowerCase()} stock. Whale activity is neutral — institutions haven't confirmed the move with unusual volume.${bdCtx()}`;
-    action = `<strong>Valid setup.</strong> Watch for volume above 1.5× average as the trigger for full position entry.`;
+    headline = 'Technical + Fundamental aligned, volume flow not yet confirming';
+    body = `Strong price action (${r.score}/8) on a ${fund.signal.toLowerCase()} stock. Volume flow (MFI/OBV) is neutral — no unusual-volume confirmation yet.${bdCtx()}`;
+    action = `<strong>Trend + fundamentals aligned; volume not confirming yet.</strong> Descriptive context, not a buy signal. Validated buy-list = Momentum tab.`;
   } else if (tech.bull && whale.bull && fund.neutral && !fund.loading) {
-    headline = 'Momentum + Institutional backing, fair valuation';
-    body = `Technical momentum (${r.score}/8) and institutional accumulation (${whale.sub}) align. The stock is fairly valued — this is a momentum trade, not a deep-value play. The trend has institutional support.${bdCtx()}`;
-    action = `<strong>Momentum entry valid.</strong> This isn't a value play — tighten stops if momentum stalls. Take profits at T1 (1:1 R:R).`;
+    headline = 'Momentum + volume flow aligned, fair valuation';
+    body = `Technical momentum (${r.score}/8) and volume flow (MFI/OBV: ${whale.sub}) align. The stock is fairly valued — this is a momentum character, not a deep-value play. The trend has volume-flow support.${bdCtx()}`;
+    action = `<strong>Momentum + volume flow aligned, fair valuation.</strong> Descriptive trend state, not a buy trigger — tighten stops if momentum stalls. The validated momentum buy-list is the Momentum tab.`;
   } else if (fund.bull && whale.bull && tech.neutral && !fund.loading) {
-    headline = 'Value + Smart money, waiting on technical confirmation';
-    body = `Fundamentals look attractive (${fund.pct}/100) and institutions are accumulating (${whale.sub}), but technical structure hasn't confirmed yet (${r.score}/8). This may be early-stage accumulation before a breakout.${bdCtx()}`;
-    action = `<strong>Partial entry reasonable for investors.</strong> Wait for RSI to cross 52 or MACD to turn positive before adding more.`;
+    headline = 'Value + volume flow, waiting on technical confirmation';
+    body = `Fundamentals look attractive (${fund.pct}/100) and volume flow is constructive (MFI/OBV: ${whale.sub}), but technical structure hasn't confirmed yet (${r.score}/8). This may be early-stage accumulation before a breakout.${bdCtx()}`;
+    action = `<strong>Fundamentals + volume flow constructive; technical unconfirmed.</strong> Descriptive only, not a buy signal. Validated buy-list = Momentum tab.`;
   } else if (tech.bull && fund.bear && !fund.loading) {
     headline = 'Technical breakout on stretched valuation';
     body = `Price momentum is real (${r.score}/8) but the stock trades at a fundamental premium (${fund.pct}/100 — ${fund.signal.toLowerCase()}). Momentum can persist, but the margin of safety is thin.${bdCtx()}`;
-    action = `<strong>Short-term swing trade only.</strong> Not suitable for buy-and-hold. Take profits at T1 and use tight stops.`;
+    action = `<strong>Momentum on a stretched valuation</strong> — thin margin of safety. Descriptive, not a buy signal; this score isn't a validated entry. Validated buy-list = Momentum tab.`;
   } else if (fund.loading) {
-    headline = 'Technical + Institutional assessed, loading fundamentals...';
-    body = `Technical: ${tech.signal} (${r.score}/8). Institutional: ${whale.signal} (${whale.sub}). Fundamental analysis loading — full synthesis will update shortly.${bdCtx()}`;
+    headline = 'Technical + volume flow assessed, loading fundamentals...';
+    body = `Technical: ${tech.signal} (${r.score}/8). Volume flow: ${whale.signal} (${whale.sub}). Fundamental analysis loading — full synthesis will update shortly.${bdCtx()}`;
     action = 'Partial assessment available now. Full 360° analysis updating...';
   } else {
     headline = 'Mixed signals — no clear multi-dimensional edge';
-    body = `Technical ${tech.signal} (${r.score}/8), fundamentals ${fund.signal.toLowerCase()} (${fund.pct}/100), institutional ${whale.signal.toLowerCase()} (${whale.sub}). The three dimensions don't yet align.${bdCtx()}`;
+    body = `Technical ${tech.signal} (${r.score}/8), fundamentals ${fund.signal.toLowerCase()} (${fund.pct}/100), volume flow ${whale.signal.toLowerCase()} (${whale.sub}). The three dimensions don't yet align.${bdCtx()}`;
     action = `<strong>Wait for clearer alignment.</strong> No strong edge across all pillars — preserve capital.`;
   }
 
@@ -241,6 +241,7 @@ function build360Card(r, fscore) {
     return `<div class="a360-deal-strip">
       <div class="a360-deal-hdr">Block Deals Today
         <span style="color:${dirCol};font-weight:700">${dir}</span>
+        <span style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--yellow);font-size:9px">experimental — not a validated edge (event-level t 1.94)</span>
         ${conflictBadge}
       </div>
       ${rows}
@@ -255,7 +256,7 @@ function build360Card(r, fscore) {
     <div class="a360-pillars">
       ${pillar('📈','Technical', tech)}
       ${pillar('💰','Fundamental', fund)}
-      ${pillar('🐋','Institutional', whale)}
+      ${pillar('📊','Volume Flow', whale)}
     </div>
     ${bdStrip}
     ${whale.cmaConfirmed ? (() => {
@@ -567,7 +568,7 @@ function buildSignalTab(r){
         <div class="exec-lvl-label">${t('execRes')}</div>
         <div class="exec-lvl-val">${topRes.length?topRes.map(v=>fmt2(v)).join(' · '):'<span class="exec-lvl-na">—</span>'}</div>
       </div>
-      <div class="exec-lvl exec-lvl-entry" title="${isBearExec?'Ideal short entry at the current price — the strategy enters at market when the bearish signal triggers.':'Ideal pullback entry near the EMA 34 (mid-term trend line). Waiting for price to return here gives you a better entry than chasing — lower risk, higher reward.'}">
+      <div class="exec-lvl exec-lvl-entry" title="${isBearExec?'Illustrative reference at the current price — this score is not a validated short trigger. Validated buy-list = Momentum tab.':'Illustrative pullback reference near EMA 34 (mid-term trend line) — not a validated buy trigger. If you do trade it, returning here is lower-risk than chasing. Validated buy-list = Momentum tab.'}">
         <div class="exec-lvl-label">${isBearExec?t('execEntry'):'Pullback entry <span style="font-size:9px;color:var(--text3)">(EMA 34)</span>'}</div>
         <div class="exec-lvl-val">${execEntry!=null?fmt2(execEntry):'<span class="exec-lvl-na">—</span>'}</div>
       </div>
@@ -734,7 +735,7 @@ function buildSignalTab(r){
   // Store chart params on the container; load lazily when the Chart tab becomes visible
   const _chartWrap = document.getElementById('drawer-native-chart');
   if (_chartWrap) {
-    const _dp = (_oppCache.find(o => o.sym === r.sym) || {}).discovery_price || null;
+    const _dp = ((window._oppCache || []).find(o => o.sym === r.sym) || {}).discovery_price || null;
     _chartWrap.dataset.sym = r.sym;
     _chartWrap.dataset.dp  = _dp ?? '';
     _chartWrap.dataset.cp  = r.price ?? '';

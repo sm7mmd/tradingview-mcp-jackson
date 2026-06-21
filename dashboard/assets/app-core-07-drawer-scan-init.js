@@ -9,7 +9,7 @@ function openDrawer(r){
   // Discovery price badge — shows change since stock first appeared in Top Opportunities
   const discEl = document.getElementById('d-discovery');
   if (discEl) {
-    const opp = _oppCache.find(o => o.sym === r.sym);
+    const opp = (window._oppCache || []).find(o => o.sym === r.sym);
     if (opp && opp.discovery_price && r.price) {
       const dp = opp.discovery_price;
       const delta = ((r.price - dp) / dp * 100);
