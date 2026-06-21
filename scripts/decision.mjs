@@ -13,6 +13,7 @@
  *   npm run decision -- --quiet      # suppress the db boot log (--json implies --quiet)
  *   npm run --silent decision -- --json | jq      # clean pipe (--silent drops npm's own run banner)
  *   node --experimental-sqlite scripts/decision.mjs --json | jq   # or call node directly
+ *   npm run decision -- --held "1120,2222"   # what-if HOLD/SELL vs these holdings (ignores DB)
  *
  * Note: prices/picks are point-in-time. Re-run on the rebalance morning before trading —
  * the list can shift. Debt/cash ratios shown are indicative; confirm AAOIFI per name.
@@ -22,6 +23,12 @@ const has = (flag) => process.argv.includes(flag);
 const ACCT = +(arg('--acct') || process.env.DECISION_ACCT || 100000);
 const JSON_OUT = has('--json');
 const QUIET = has('--quiet') || JSON_OUT;   // db.js logs "[db] migrated…" at import time
+// --held "1120,2222" → what-if HOLD/SELL preview without logging positions in the DB first.
+// Normalizes bare 4-digit codes to TADAWUL:xxxx (same rule as the Lab's addPosition). When
+// given, it REPLACES the DB positions for this run.
+const HELD = (arg('--held') || '')
+  .split(',').map(s => s.trim()).filter(Boolean)
+  .map(s => /^\d{4}$/.test(s) ? `TADAWUL:${s}` : s);
 
 // Dynamic import so we can mute the db boot log (it fires during module init, before any of
 // our code would otherwise run — imported modules execute before a static importer's body).
@@ -52,7 +59,7 @@ function rowLine(h, perName) {
 
 async function main() {
   const { dbPositions, getMomentumScreen, sarPerName } = await loadDeps();
-  const heldSyms = Object.keys(dbPositions.getAll() || {});
+  const heldSyms = HELD.length ? HELD : Object.keys(dbPositions.getAll() || {});
   const r = await getMomentumScreen({ heldSyms });
   if (!r.success) { console.error('FAILED:', r.error); process.exit(1); }
 
