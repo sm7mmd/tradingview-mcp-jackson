@@ -196,13 +196,13 @@ function scoreLabel(s,m){
 }
 function plainSignal(bias){
   return{
-    'STRONG BUY': 'Strong opportunity — most indicators aligned',
-    'BUY':        'Good entry signal — trend is positive',
-    'WATCH':      'Shows promise — wait for confirmation',
-    'SKIP':       'No clear direction — sit on the sidelines',
-    'AVOID':      'Caution advised — risk outweighs reward',
-    'SELL':       'Exit signal — momentum weakening',
-    'STRONG SELL':'Strong exit — multiple red flags',
+    'STRONG BUY': 'Strong uptrend state — descriptive, not a buy signal',
+    'BUY':        'Uptrend state — a description, not a recommendation',
+    'WATCH':      'Mixed / building trend — not a signal',
+    'SKIP':       'No clear trend',
+    'AVOID':      'Early downtrend lean (descriptive)',
+    'SELL':       'Downtrend state (descriptive, not advice)',
+    'STRONG SELL':'Strong downtrend state (descriptive, not advice)',
     'ERROR':      'Could not load data for this stock',
     'NO_DATA':    'Not enough data to evaluate',
   }[bias]||'';

@@ -524,15 +524,15 @@ function renderMarketMood() {
   let icon, mood, color, desc;
   if (total >= 10) {
     icon = '🟢'; mood = 'Good'; color = 'var(--green)';
-    desc = `${total} stocks have strong buy signals right now. Market conditions are favorable — a good time to look for opportunities.`;
+    desc = `${total} stocks are in a strong uptrend state right now (descriptive breadth, not a buy signal). Read it as market context; the validated buy-list is the Momentum tab.`;
   } else if (total >= 4) {
     icon = '🟡'; mood = 'Cautious'; color = 'var(--yellow)';
-    desc = `${total} buy signal${total !== 1 ? 's' : ''} found. Market is mixed — be selective. Focus on only the highest-scoring stocks.`;
+    desc = `${total} stock${total !== 1 ? 's' : ''} in an uptrend state — breadth is mixed (descriptive, not advice). Act on the Momentum tab, not this count.`;
   } else {
     icon = '🔴'; mood = 'Weak'; color = 'var(--red)';
     desc = sell >= 5
-      ? `Market is weak — ${sell} stocks are showing sell signals. Better to wait on the sidelines until conditions improve.`
-      : `Only ${total} buy signal${total !== 1 ? 's' : ''} right now. Market lacks direction. Patience is the best trade.`;
+      ? `Market breadth is weak — ${sell} stocks in a downtrend state. Context only, not a signal.`
+      : `Only ${total} stock${total !== 1 ? 's' : ''} in an uptrend state. Market lacks direction (descriptive breadth).`;
   }
   el.innerHTML = `<div class="mood-banner">
     <div>

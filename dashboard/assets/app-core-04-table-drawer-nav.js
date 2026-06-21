@@ -92,7 +92,7 @@ function renderTable(){
     // Bias badge with tooltip (natural language summary)
     const passFlags=(r.flags||[]).join(', ')||'—';
     const _sc=r.score||0, _mx=r.maxScore||9;
-    const _bDesc=_sc>=7?'Strong, well-confirmed setup — all major filters are aligned.':_sc>=5?'Good setup — most filters aligned, a solid signal.':_sc>=3?'Approaching a signal — a few criteria still need to flip.':'Most criteria not yet aligned — no actionable signal.';
+    const _bDesc=_sc>=7?'Strong trend alignment — descriptive state, not a buy signal (score had no validated edge; use the Momentum tab).':_sc>=5?'Moderate trend alignment — descriptive, not a recommendation.':_sc>=3?'Mixed trend — few criteria aligned.':'Weak — most criteria not aligned.';
     const _warns=(r.warnings||[]).length?'\nWatch: '+(r.warnings||[]).join('. ')+'.':'';
     const biasTitle=`${r.bias} — ${_sc} of ${_mx} criteria aligned.\n${_bDesc}\nPassing: ${passFlags}.${_warns}`;
     // EMA tooltip (natural language)
@@ -108,7 +108,7 @@ function renderTable(){
       <td class="hm"><span class="sector-badge sector-${sec}">${sectorLabel(sec)}</span></td>
       <td class="td-price" title="${nativeCcy(r.sym)} price · toggle header to convert">${priceV}</td>
       <td style="text-align:end;font-weight:700;font-size:12px;color:${chgCol};font-family:'JetBrains Mono',monospace">${chgV}</td>
-      <td>${(()=>{const _rk=_rankMap.get(r.sym);const _rkHtml=_rk&&_rk.total>3?`<span style="font-size:9px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-inline-start:5px" title="Rank #${_rk.rank} of ${_rk.total} in this market by score">#${_rk.rank}</span>`:'';return`<div class="score-wrap" title="${r.score} of ${r.maxScore||9} criteria aligned. ${(r.score||0)>=7?'Very strong — all major filters confirm the direction.':( r.score||0)>=5?'Good — most filters aligned.':( r.score||0)>=3?'Moderate — approaching signal territory.':'Weak — most criteria not yet aligned.'}"><div class="score-bar"><div class="score-fill" style="width:${pct}%;background:${col}"></div></div><span class="score-text">${r.score}/${r.maxScore||9}</span>${_rkHtml}</div><div class="score-tier" style="color:${scoreLabel(r.score,r.maxScore||8).col}">${scoreLabel(r.score,r.maxScore||8).text}</div>${r.regime_discount>0?`<div style="font-size:9px;color:var(--orange);margin-top:2px" title="Regime-adjusted: ${r.regime_score}/${r.maxScore||8} — market is ${r.market_regime}">⚠ -${r.regime_discount} ${r.market_regime} mkt</div>`:''}${scoreSparklineHtml(r.sym)}${priceSparklineHtml(r.sym)}<div style="display:inline-flex;align-items:center;gap:2px;margin-top:1px">${velocityArrowHtml(r.sym)}</div>`;})()}</td>
+      <td>${(()=>{const _rk=_rankMap.get(r.sym);const _rkHtml=_rk&&_rk.total>3?`<span style="font-size:9px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-inline-start:5px" title="Rank #${_rk.rank} of ${_rk.total} in this market by score">#${_rk.rank}</span>`:'';return`<div class="score-wrap" title="${r.score} of ${r.maxScore||9} trend criteria aligned (descriptive — NOT a buy signal; the score had no validated edge, use the Momentum tab). ${(r.score||0)>=7?'Strong trend alignment.':( r.score||0)>=5?'Moderate alignment.':( r.score||0)>=3?'Mixed trend.':'Weak.'}"><div class="score-bar"><div class="score-fill" style="width:${pct}%;background:${col}"></div></div><span class="score-text">${r.score}/${r.maxScore||9}</span>${_rkHtml}</div><div class="score-tier" style="color:${scoreLabel(r.score,r.maxScore||8).col}">${scoreLabel(r.score,r.maxScore||8).text}</div>${r.regime_discount>0?`<div style="font-size:9px;color:var(--orange);margin-top:2px" title="Regime-adjusted: ${r.regime_score}/${r.maxScore||8} — market is ${r.market_regime}">⚠ -${r.regime_discount} ${r.market_regime} mkt</div>`:''}${scoreSparklineHtml(r.sym)}${priceSparklineHtml(r.sym)}<div style="display:inline-flex;align-items:center;gap:2px;margin-top:1px">${velocityArrowHtml(r.sym)}</div>`;})()}</td>
       <td class="hm">${dHtml}</td>
       <td style="text-align:end"><span class="rsi-pill ${rsiClass(r.rsi)}">${rsiV}</span></td>
       <td class="td-macd hm ${r.macd_hist>0?'macd-pos':'macd-neg'}">${macdV}</td>
@@ -247,15 +247,16 @@ function goToDrawerTab(tabName){
   if(tabs[idx]) switchDrawerTab(tabName,tabs[idx]);
 }
 
-// ─── Fix 1.1 Signal Legend ───────────────────────────────────────────────────
+// ─── Signal Legend — DESCRIPTIVE trend-state labels, NOT buy/sell advice. The 9-pt score had
+// no validated edge (lagged buy-and-hold); the validated buy-list is the Momentum tab. ──────────
 const SIGNAL_LEGEND = [
-  {icon:'🟢',bias:'STRONG BUY',  en:'7+ criteria met (out of 9 in Swing, 8 in Breakout) — all bullish signals aligned. High-conviction long entry.',  ar:'7+ معايير متحققة (من 9 في وضع التأرجح) — جميع الإشارات صعودية. دخول شراء عالي الثقة.'},
-  {icon:'🟩',bias:'BUY',         en:'5–6 criteria met — bullish bias with minor gaps. Consider partial entry.',       ar:'5–6 معايير — اتجاه صعودي مع ثغرات بسيطة. يُنصح بدخول جزئي.'},
-  {icon:'🟡',bias:'WATCH',       en:'3–4 criteria met — mixed signals. Add to watchlist, wait for confirmation.',       ar:'3–4 معايير — إشارات مختلطة. أضف للمراقبة وانتظر التأكيد.'},
-  {icon:'⚫',bias:'SKIP',        en:'Below 3 criteria — insufficient bullish evidence. No trade.',                    ar:'أقل من 3 معايير — أدلة صعودية غير كافية. لا تداول.'},
-  {icon:'🟠',bias:'AVOID',       en:'3–4 bearish criteria met — early bearish lean. Do not buy.',                     ar:'3–4 معايير هبوطية — ميل هبوطي مبكر. لا تشتر.'},
-  {icon:'🔴',bias:'SELL',        en:'5–6 bearish criteria — confirmed downtrend. Exit or reduce longs.',              ar:'5–6 معايير هبوطية — هبوط مؤكد. اخرج أو قلل مراكز الشراء.'},
-  {icon:'🔴',bias:'STRONG SELL', en:'7+ bearish criteria — all signals bearish. High-conviction exit or avoid.',             ar:'7+ معايير هبوطية — جميع الإشارات هابطة. خروج عالي الثقة.'},
+  {icon:'🟢',bias:'STRONG BUY',  en:'7+ of 9 criteria aligned — strong uptrend STATE. Descriptive only, not a buy signal (lagged buy-and-hold in testing). Validated buy-list = Momentum tab.',  ar:'7+ من 9 معايير — حالة اتجاه صعودي قوي. وصفية فقط، ليست إشارة شراء. قائمة الشراء المعتمدة = تبويب الزخم.'},
+  {icon:'🟩',bias:'BUY',         en:'5–6 criteria aligned — uptrend state. A description of current price behaviour, not a recommendation.',       ar:'5–6 معايير — حالة اتجاه صعودي. وصف للحالة، ليست توصية.'},
+  {icon:'🟡',bias:'WATCH',       en:'3–4 criteria aligned — mixed/building trend state. Not a signal.',       ar:'3–4 معايير — حالة اتجاه مختلطة. ليست إشارة.'},
+  {icon:'⚫',bias:'SKIP',        en:'Below 3 criteria — weak / no clear trend state.',                    ar:'أقل من 3 معايير — حالة اتجاه ضعيفة أو غير واضحة.'},
+  {icon:'🟠',bias:'AVOID',       en:'3–4 bearish criteria — early downtrend lean (descriptive).',                     ar:'3–4 معايير هبوطية — ميل هبوطي مبكر (وصفي).'},
+  {icon:'🔴',bias:'SELL',        en:'5–6 bearish criteria — downtrend state (descriptive, not advice).',              ar:'5–6 معايير هبوطية — حالة هبوط (وصفية، ليست نصيحة).'},
+  {icon:'🔴',bias:'STRONG SELL', en:'7+ bearish criteria — strong downtrend state. Descriptive, not advice.',             ar:'7+ معايير هبوطية — حالة هبوط قوي. وصفية، ليست نصيحة.'},
   {icon:'⚠️',bias:'ERROR',       en:'Data feed failure for this symbol. Check your data source or retry.',              ar:'فشل بيانات لهذا الرمز. تحقق من المصدر أو أعد المحاولة.'},
   {icon:'❓',bias:'NO DATA',     en:'Missing price, volume, or indicator data — symbol may not be active.',             ar:'بيانات سعر أو حجم مفقودة — قد لا يكون الرمز نشطاً.'},
 ];
