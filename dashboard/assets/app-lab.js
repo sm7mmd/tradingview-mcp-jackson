@@ -630,6 +630,27 @@ async function loadMomentumScreen() {
         <span style="font-size:10px;color:var(--text2);line-height:1.4">Seasonal overlay · ${sn.note} <span style="color:var(--text3)">Weakest months: ${(sn.weakestMonthNames || []).join(' & ')}.</span></span>
       </div>` : '';
     const sz = d.sizing || {};
+    const ts = d.turnover || { buy: [], hold: [], sell: [] };
+    const stt = d.state || {};
+    const stColor = stt.status === 'promoted' ? 'var(--green)' : stt.status === 'decaying' ? 'var(--yellow)' : '#ff5252';
+    const stateBadge = stt.status ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:8px;cursor:help;background:${stColor}1a;border:1px solid ${stColor}55" title="Strategy state::An automatic governor on how hard to size this strategy. PROMOTED = full size (the edge is proven and holding). DECAYING = risk halved (recent performance slipped). RETIRED/CANDIDATE = 0% (not trusted right now). It moves down automatically if the edge weakens.">
+        <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;background:${stColor};color:#000">${String(stt.status).toUpperCase()}</span>
+        <span style="font-size:10px;color:var(--text2);line-height:1.4">Effective sizing ${Math.round((stt.exposure_mult ?? 0) * 100)}% of Scheme-D${stt.reason ? ` · ${stt.reason}` : ''}</span>
+      </div>` : '';
+    const nm = h => `${h.name} <span style="color:var(--text3);font-weight:400">${h.code || ''}</span>`;
+    const listLine = (label, arr, color, render) => `<div style="margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:.5px">${label} (${arr.length})</span> <span style="font-size:11px;color:var(--text2)">${arr.length ? arr.map(render).join(', ') : '—'}</span></div>`;
+    const turnoverBlock = `<div style="margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--border)" title="This month's trades::What to do vs what you currently hold. BUY = new picks you don't own. HOLD = picks you already own (keep them). SELL = names you own that fell out of the top list (exit). Based on your logged positions.">
+        <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:6px">This month's trades</div>
+        ${listLine('Buy', ts.buy || [], 'var(--green)', nm)}
+        ${listLine('Hold', ts.hold || [], 'var(--text2)', nm)}
+        ${listLine('Sell', ts.sell || [], '#ff5252', h => nm(h))}
+        ${(!(ts.hold||[]).length && !(ts.sell||[]).length) ? `<div style="font-size:9px;color:var(--text3);margin-top:4px">You hold nothing in these names yet — this is your starting buy-list. Log positions to track HOLD/SELL.</div>` : ''}
+      </div>`;
+    const sarCalc = sz.exposurePct != null ? `<div style="margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--border)" title="Order-size calculator::Type your account size; it splits the invested fraction equally across the picks so you know how many Riyals to put in each name.">
+        <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:6px">Order sizing</div>
+        <label style="font-size:10px;color:var(--text2)">Account (SAR) <input id="mom-acct" type="number" value="100000" style="width:110px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:3px 6px;font-family:'JetBrains Mono',monospace;font-size:11px"></label>
+        <span id="mom-sar-out" style="font-size:11px;color:var(--text2);margin-left:8px"></span>
+      </div>` : '';
     const sizingBanner = sz.exposurePct != null ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 10px;border-radius:8px;cursor:help;background:var(--accent)14;border:1px solid var(--accent)44" title="Position sizing (how much to invest)::Owning the right stocks is only half the job — the other half is how much money to put in. This model shrinks how much of your account is invested when the market gets jumpy (high volatility) and pushes it back up when things calm down, aiming for a steady ${sz.targetVolPct}%/yr risk level. In the backtest this turned a brutal −21% year into about −8%, for a smaller cut to long-run returns. In a weak month it goes fully to cash.">
         <div style="display:flex;flex-direction:column;align-items:center;min-width:54px">
           <span style="font-size:20px;font-weight:800;color:var(--accent);line-height:1">${sz.exposurePct}%</span>
@@ -642,8 +663,11 @@ async function loadMomentumScreen() {
         <span style="font-size:12px;font-weight:800;color:var(--text);cursor:help" title="Momentum Screen::A monthly shopping list of stocks to buy. It picks the Saudi shares that have climbed the most over the past 6 months — the idea (called momentum) is that recent winners tend to keep winning for a while. You refresh the list once a month.">Momentum Screen</span>
         <span style="font-size:10px;color:var(--text3);cursor:help" title="How the list is filtered::Start with Sharia-compliant stocks only → keep the easier-to-trade half (liquid) → keep only companies listed at least 2 years (skip fresh IPOs, whose prices are too jumpy) → then take the top 20% by 6-month gain.">monthly buy-list · Sharia-compliant · liquid · ≥2y listed · top-quintile 6mo momentum</span>
       </div>
+      ${stateBadge}
       ${seasonBanner}
       ${sizingBanner}
+      ${turnoverBlock}
+      ${sarCalc}
       <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px">The one validated edge on your real constraints (<span style="cursor:help" title="Trading cost::Derayah charges no commission — only ~0.11% in regulatory fees for a full buy-and-sell round trip. Low cost is what makes a monthly-rebalanced strategy worthwhile.">Derayah ${p.cost}</span>). Backtest: <span style="cursor:help" title="Excess return::How much MORE this strategy made per year than just owning every compliant stock equally. This is the honest measure of skill — beating a fair benchmark, not just going up with the market.">excess</span> <strong style="color:var(--green)">${v.excessPerYr}</strong> vs equal-weight compliant basket · <span style="cursor:help" title="Absolute return (CAGR)::The actual compounded yearly growth of the money itself — what your account balance would do per year, on average.">abs CAGR ${v.absCagr}</span> · <span style="cursor:help" title="Statistical significance (t-stat)::How sure we are this is a real pattern and not luck. Above 2 means it would rarely happen by chance; this scores 2.6–3.2, which is solid.">t=${v.nwT}</span> · <span style="cursor:help" title="Maximum drawdown::The worst drop from a peak to a low you'd have lived through. Smaller is better — and this strategy's worst drop was milder than the market's.">maxDD ${v.maxDD}</span>. <span style="color:var(--yellow);cursor:help" title="Important caveats::The numbers are honest but not bulletproof: the data only includes companies still trading today (shave ~1–1.5%/yr for that), and the Sharia screen is partly sector-based — double-check each name's financial ratios (debt, interest income) before you actually buy it.">${v.caveat}</span></div>
       <div class="lab-stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
         <div class="lab-stat" style="cursor:help" title="Equal-weight picks::How many stocks to hold. You split your money evenly across all of them (about ${p.weighting.replace('equal-weight (~','').replace(')','')}), so no single stock can sink you.">${''}<div class="lab-stat-val" style="font-size:18px;color:var(--text)">${u.holdings}</div><div class="lab-stat-lbl">equal-weight picks</div><div style="font-size:9px;color:var(--text3);margin-top:3px">${p.weighting}</div></div>
@@ -655,6 +679,19 @@ async function loadMomentumScreen() {
         <tbody>${rows}</tbody></table></div>
       <div style="font-size:9px;color:var(--text3);margin-top:8px">Hold equal-weight until ${d.nextRebalance}, then re-screen. Sit out the 2 historically-weakest months (seasonal overlay) for lower drawdown.</div>
     </div>`;
+    const acct = document.getElementById('mom-acct'), out = document.getElementById('mom-sar-out');
+    if (acct && out) {
+      const recompute = () => {
+        const n = (d.holdings || []).length;
+        const exp = (d.sizing?.exposurePct) || 0;
+        const A = +acct.value || 0;
+        const perName = n > 0 ? Math.round(A * (exp / 100) / n) : 0;
+        const deployed = perName * n, cash = Math.round(A) - deployed;
+        out.textContent = n ? `→ ${perName.toLocaleString()} SAR/name × ${n} = ${deployed.toLocaleString()} invested, ${cash.toLocaleString()} cash` : 'no eligible picks this month';
+      };
+      acct.addEventListener('input', recompute);
+      recompute();
+    }
   } catch(_) { el.innerHTML = `<div class="lab-insight-card"><div style="font-size:10px;color:var(--text3)">Momentum screen failed to load.</div></div>`; }
 }
 
