@@ -7,7 +7,8 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { scoreBias, computeSeasonality, volumeCheck, detectDivergence, findSRLevels } from '../scripts/tasi_screener.mjs';
+import { scoreBias, computeSeasonality, volumeCheck, detectDivergence, findSRLevels,
+  calcMFI, calcOBVTrend, calcVolumeZScore, calcHurst, calcATRPercentileRank, computeStyleTags } from '../scripts/tasi_screener.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
@@ -283,5 +284,102 @@ describe('findSRLevels — swing support/resistance', () => {
     // flat series → no pivots that beat neighbors strictly enough on both sides
     assert.deepEqual(sr.support, []);
     assert.deepEqual(sr.resistance, []);
+  });
+});
+
+// ── calcMFI (money flow index 0-100) ────────────────────────────────────────
+describe('calcMFI — money flow index', () => {
+  it('null when fewer than period+1 bars', () => {
+    assert.equal(calcMFI([1], [1], [1], [1], 14), null);
+  });
+  it('all-rising typical price → 100 (no negative flow)', () => {
+    const n = 16, h = [], l = [], c = [], v = [];
+    for (let i = 0; i < n; i++) { c.push(100 + i); h.push(101 + i); l.push(99 + i); v.push(1000); }
+    assert.equal(calcMFI(h, l, c, v, 14), 100);
+  });
+  it('all-falling typical price → 0 (no positive flow)', () => {
+    const n = 16, h = [], l = [], c = [], v = [];
+    for (let i = 0; i < n; i++) { c.push(100 - i); h.push(101 - i); l.push(99 - i); v.push(1000); }
+    assert.equal(calcMFI(h, l, c, v, 14), 0);
+  });
+});
+
+// ── calcOBVTrend (rising/falling/flat via OBV slope) ────────────────────────
+describe('calcOBVTrend — OBV regression slope sign', () => {
+  it('null under period+1 bars', () => {
+    assert.equal(calcOBVTrend([1, 2], [10, 10], 20), null);
+  });
+  it('rising prices on volume → rising OBV', () => {
+    const c = [], v = [];
+    for (let i = 0; i < 25; i++) { c.push(100 + i); v.push(1000); }
+    assert.equal(calcOBVTrend(c, v, 20), 'rising');
+  });
+  it('falling prices on volume → falling OBV', () => {
+    const c = [], v = [];
+    for (let i = 0; i < 25; i++) { c.push(100 - i); v.push(1000); }
+    assert.equal(calcOBVTrend(c, v, 20), 'falling');
+  });
+});
+
+// ── calcVolumeZScore (latest bar vs baseline) ───────────────────────────────
+describe('calcVolumeZScore — latest volume vs 20-day baseline', () => {
+  it('null under period+1 bars', () => {
+    assert.equal(calcVolumeZScore([1, 2, 3], 20), null);
+  });
+  it('0 when baseline has no variance', () => {
+    assert.equal(calcVolumeZScore([...Array(20).fill(100), 100], 20), 0);
+  });
+  it('positive z when latest spikes above a varied baseline', () => {
+    const base = Array.from({ length: 20 }, (_, i) => 100 + (i % 2 ? 10 : -10)); // mean 100, std 10
+    const z = calcVolumeZScore([...base, 130], 20);
+    assert.ok(z > 0, `z=${z}`);
+  });
+});
+
+// ── calcHurst (0-1 persistence exponent) ────────────────────────────────────
+describe('calcHurst — Hurst exponent', () => {
+  it('null when fewer than 50 bars', () => {
+    assert.equal(calcHurst(Array.from({ length: 40 }, (_, i) => 100 + i)), null);
+  });
+  it('returns a value in [0,1] for a trending series', () => {
+    const c = Array.from({ length: 200 }, (_, i) => 100 * Math.pow(1.001, i)); // steady uptrend
+    const h = calcHurst(c);
+    assert.ok(h >= 0 && h <= 1, `h=${h}`);
+  });
+});
+
+// ── calcATRPercentileRank (0-100 where current ATR sits) ────────────────────
+describe('calcATRPercentileRank — ATR percentile', () => {
+  it('null when fewer than period+1 bars', () => {
+    assert.equal(calcATRPercentileRank([1], [1], [1], 14, 252), null);
+  });
+  it('expanding range → current ATR near the top (high rank)', () => {
+    const n = 60, h = [], l = [], c = [];
+    for (let i = 0; i < n; i++) { const w = 1 + i * 0.2; c.push(100); h.push(100 + w); l.push(100 - w); }
+    const r = calcATRPercentileRank(h, l, c, 14, 252);
+    assert.ok(r >= 90, `rank=${r}`);
+  });
+});
+
+// ── computeStyleTags (Momentum/Trend/Breakout/Recovery/Pullback) ────────────
+describe('computeStyleTags — setup classification', () => {
+  it('bearish bias yields no bull tags', () => {
+    assert.deepEqual(computeStyleTags({ bias: 'STRONG SELL', rsi: 60 }), []);
+  });
+  it('tags Momentum on RSI/MACD/vol/score', () => {
+    const tags = computeStyleTags({ bias: 'BUY', rsi: 60, macd_hist: 0.5, vol_ratio: 1.6, score: 7,
+      emas: { ema13: 1, ema34: 1, ema89: 1, ema200: 1 }, price: 1 });
+    assert.ok(tags.includes('Momentum'), JSON.stringify(tags));
+  });
+  it('tags Trend on EMA stack above 200 with trending Hurst', () => {
+    const tags = computeStyleTags({ bias: 'BUY', rsi: 50, macd_hist: 0, vol_ratio: 1, score: 5,
+      emas: { ema13: 110, ema34: 105, ema89: 100, ema200: 90 }, price: 115, hurst: 0.6 });
+    assert.ok(tags.includes('Trend'), JSON.stringify(tags));
+  });
+  it('caps at 2 tags', () => {
+    const tags = computeStyleTags({ bias: 'BUY', rsi: 60, macd_hist: 0.5, vol_ratio: 2.5, score: 8,
+      emas: { ema13: 110, ema34: 105, ema89: 100, ema200: 90 }, price: 115, hurst: 0.6, rs_score: 2.0,
+      rsi_buildup: { is_building: true } });
+    assert.ok(tags.length <= 2, JSON.stringify(tags));
   });
 });
