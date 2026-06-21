@@ -52,6 +52,28 @@ months of issuer announcements → more contract events → a powered test with 
 If it holds at n≥30+ with the spread intact, it graduates to a candidate under the state machine
 (guilty until proven; multi-window OOS required before capital).
 
+## Harvest-more attempt (2026-06-21) — blocked by tooling, sample unchanged
+
+Tried to grow the underpowered govt-liquid sample by harvesting more contract history.
+- **firecrawl stealth DOES bypass the saudiexchange.sa Akamai wall** (renders the JS-injected
+  announcement rows with 4-digit codes + dates) — a useful, confirmed capability.
+- **But the feed pages too shallowly:** `&page=N` advances ~5–8 rows / ~5 days per *16 pages*;
+  reaching 2024–2025 would take hundreds–thousands of paged stealth scrapes. Firecrawl **ran out
+  of credits at page 17.**
+- Net: **14 new contract announcements, all Jun 16–21 2026** — too recent to be matured (need 20
+  forward trading days), so the study **skips them. Re-run is identical: n=22 govt-liquid,
+  +4.15% net, NW-t 2.11, UNDERPOWERED.** They're imported (contract total 196→206) and will mature
+  in ~3 weeks, seeding future runs.
+
+**Realistic paths to actually power this (none feasible in-session now):**
+1. **Headed desktop harvester** using the site's **date-range filter** (a form POST, not `&page`):
+   `HEADLESS=false node scripts/harvest_catalysts.mjs …` on a real desktop to bulk-backfill
+   2024–2025 contracts — the memory-flagged "headed on real desktop" job.
+2. **`anId` detail-page backfill** — anId is a dense sequential counter (~96103 now); iterate
+   downward to ~Feb 2026 (~thousands of fetches) — needs firecrawl credits + a batch crawl.
+3. **Time** — keep harvesting recent announcements weekly; the lead's sample grows ~naturally as
+   events mature (months).
+
 ## Where this leaves the hunt
 
 Three layers dead (sizing, flow, PEAD); **the fourth (govt contract-flow) is the first live thread —
