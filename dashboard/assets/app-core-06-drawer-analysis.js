@@ -24,7 +24,6 @@ function get360FundPillar(fscore) {
 }
 
 function get360WhalePillar(r) {
-  const ws  = r.whale_score ?? 0;
   const mfi = r.mfi ?? 50;
   const obv = r.obv_trend;
 
@@ -67,8 +66,9 @@ function get360WhalePillar(r) {
   // Block deals do NOT determine direction — MFI + OBV are authoritative.
   // Block deals only add context to the note. Letting a single deal flip
   // the pillar outcome overstates its reliability (no buyer/seller label available).
-  const bull = ws >= 6 || mfi > 65 || (ws >= 4 && obv === 'rising');
-  const bear = ws < 2 && mfi < 35;
+  // whale_score (ws) removed from direction — validated as noise (showdown t=-1.47). MFI + OBV only.
+  const bull = mfi > 65 || obv === 'rising';
+  const bear = mfi < 35 && obv === 'falling';
   const col  = bull ? 'var(--green)' : bear ? 'var(--red)' : 'var(--yellow)';
 
   // CMA filing cross-reference — authoritative direction (±5 day window)
@@ -84,14 +84,14 @@ function get360WhalePillar(r) {
     : '';
   const signal = bull ? (dealVal > 0 ? 'Accumulation + Block' : 'Accumulation')
                : bear ? (dealVal > 0 ? 'Distribution + Block' : 'Distribution') : 'Neutral';
-  const pct    = Math.round((ws / 10) * 100);
+  const pct    = Math.round(mfi != null ? mfi : 50);   // gauge on MFI (0-100), not noise whale_score
   const mfiTxt = mfi != null ? `MFI ${mfi.toFixed(0)}` : '';
   const obvTxt = obv ? `OBV ${obv}` : '';
   const dealTxt = dealVal > 0 ? `${fmtVal(dealVal)}${dealNote ? ' · ' + dealNote : ''}` : '';
   const cmaTxt = cmaConfirmed
     ? (cmaNet > 0 ? `CMA: ${cmaBuyCount}× confirmed buy` : cmaNet < 0 ? `CMA: ${cmaSellCount}× confirmed sell` : 'CMA filing exists')
     : '';
-  const sub    = [mfiTxt, obvTxt, dealTxt, cmaTxt].filter(Boolean).join(' · ') || `Whale ${ws}/10`;
+  const sub    = [mfiTxt, obvTxt, dealTxt, cmaTxt].filter(Boolean).join(' · ') || 'No institutional data';
 
   return { bull, bear, neutral:!bull&&!bear, col, pct, signal: signal + cmaLabel, sub,
            dealVal, deals, priceDiff, dealAccum, dealDist, dealNote, dealBullish, dealBearish,

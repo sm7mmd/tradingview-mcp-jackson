@@ -1594,7 +1594,7 @@ const server = createServer(async (req, res) => {
       c += Math.min(3, Math.max(0, Math.abs(slope) * 2));
       if (r.vol_compression?.is_compressed) c += 1;
       if (r.rsi_buildup?.is_building)       c += 1;
-      if (r.whale_score >= 5) c += 2; else if (r.whale_score >= 3) c += 1;
+      // whale_score removed from conviction — validated as noise (showdown t=-1.47, -8.9%/yr)
       if ((approaching === 'BUY' || approaching === 'ACCUMULATION') && r.market_regime === 'bull') c += 1;
       return Math.min(10, Math.round(c));
     }
@@ -2473,10 +2473,7 @@ const server = createServer(async (req, res) => {
         ? `ATR rank ${r.atr_pct_rank}% — ${r.atr_pct_rank <= 25 ? 'coiling (ideal entry)' : r.atr_pct_rank < 80 ? 'moderate volatility' : 'overextended — late entry risk'}`
         : 'ATR rank unavailable' });
 
-    // 7. Whale/smart money confirmation
-    const whaleOk = (r.whale_score || 0) >= 4;
-    checks.push({ name: 'Smart money', pass: whaleOk,
-      detail: `Whale score ${r.whale_score || 0}/10 — ${whaleOk ? 'institutional accumulation detected' : 'no smart money confirmation yet'}` });
+    // (whale_score "smart money" check removed — validated as noise, showdown t=-1.47/-8.9%/yr)
 
     // 8. Extension risk
     const extOk = (r.extension_pct || 0) <= 25;
@@ -2806,7 +2803,6 @@ function sigStrongBuy(r) {
   if (r.vol_ratio >= 1.5) parts.push(`volume ${r.vol_ratio}× avg`);
   else if (r.vol_ratio >= 1.2) parts.push(`vol ${r.vol_ratio}× avg`);
   if (r.mfi >= 65)     parts.push(`MFI ${r.mfi}`);
-  if (r.whale_score >= 5) parts.push(`whale ${r.whale_score}/10`);
   if (r.divergence === 'bullish')              parts.push('bullish divergence');
   if (r.weekly?.trend === 'bullish')           parts.push('weekly bullish');
   const risks = [];
@@ -2814,7 +2810,7 @@ function sigStrongBuy(r) {
   if ((r.extension_pct ?? 0) > 5) risks.push(`extended ${r.extension_pct}% above EMA13`);
   if (r.market_regime === 'bear') risks.push('bearish regime — size down');
   const note = `${parts.slice(0, 4).join('; ')}. ${setup.str}${risks.length ? ' ⚠ ' + risks[0] + '.' : ''}`;
-  const hl   = `${r.score}/${r.maxScore} confirmed` + (r.whale_score >= 6 ? ' + whale' : '') + (r.divergence === 'bullish' ? ' + div' : '');
+  const hl   = `${r.score}/${r.maxScore} confirmed` + (r.divergence === 'bullish' ? ' + div' : '');
   return { type: 'STRONG_BUY_CONFIRMED', headline: hl, note, extra: setup };
 }
 
@@ -2853,9 +2849,10 @@ function sigSmartMoney(r, ctx) {
   const hardEvidence = [recentBD.length >= 1, cmaBuys.length >= 1, insiders.length >= 1].filter(Boolean).length;
   // Stealth: OBV rising + price flat + strong institutional indicators
   const stealthOBV = r.obv_trend === 'rising' && Math.abs(r.change_pct ?? 0) < 1.5
-                     && (r.whale_score ?? 0) >= 6 && (r.mfi ?? 0) >= 60;
+                     && (r.mfi ?? 0) >= 60;
   if (hardEvidence < 1 && !stealthOBV) return null;
-  if ((r.whale_score ?? 0) < 4) return null;
+  // whale_score gate removed — it's noise (showdown t=-1.47); Smart Money now requires real
+  // evidence only (block deals / CMA buys / insider buys, or stealth OBV+MFI accumulation).
   const parts = [];
   if (recentBD.length)  parts.push(`${recentBD.length} block deal${recentBD.length > 1 ? 's' : ''} (${recentBD.slice(0,2).map(d => d.date).join(', ')})`);
   if (cmaBuys.length)   parts.push(`CMA buy: ${cmaBuys[0].institution_en || cmaBuys[0].institution || 'institution'} → ${cmaBuys[0].new_pct || '?'}%`);
@@ -2863,7 +2860,7 @@ function sigSmartMoney(r, ctx) {
   if (stealthOBV)       parts.push(`OBV rising, price flat (${r.change_pct ?? 0}%)`);
   const atrd  = oppATR(r);
   const setup = oppSetup(r, atrd);
-  const note  = `Smart money signals: ${parts.join('; ')}. Whale score ${r.whale_score ?? 0}/10. ${setup.str}`;
+  const note  = `Smart money signals: ${parts.join('; ')}. ${setup.str}`;
   return { type: 'SMART_MONEY_ACCUMULATION', headline: `Smart money: ${parts.slice(0,2).join(' + ')}`, note,
     extra: { ...setup, blockDeals: recentBD.length, cmaBuys: cmaBuys.length, insiders: insiders.length,
       blockDealDates: recentBD.map(d => d.date).slice(0,3),
@@ -2905,13 +2902,13 @@ function sigDivergence(r) {
   if (r.divergence !== 'bullish') return null;
   const nearSup = !!r.near_support;
   const mfiLow  = r.mfi != null && r.mfi < 40;
-  const whaleOk = (r.whale_score ?? 0) >= 4;
-  const cnt = [nearSup, mfiLow, whaleOk, r.rsi > 28 && r.rsi < 55].filter(Boolean).length;
+  // whale_score dropped from the confirmer count — noise (showdown t=-1.47)
+  const cnt = [nearSup, mfiLow, r.rsi > 28 && r.rsi < 55].filter(Boolean).length;
   if (cnt < 2) return null;
   const atrd  = oppATR(r);
   const setup = oppSetup(r, atrd);
-  const note  = `Bullish RSI divergence: price made lower low, RSI held higher — momentum not confirming the selloff.${nearSup ? ' Near support.' : ''}${r.mfi != null ? ` MFI ${r.mfi} (${mfiLow ? 'oversold' : 'recovering'}).` : ''} Whale ${r.whale_score ?? 0}/10${whaleOk ? ' — institutional cover.' : '.'} ${setup.str}`;
-  return { type: 'DIVERGENCE_REVERSAL', headline: `Bullish divergence + ${cnt}/4 reversal signals`, note, extra: setup };
+  const note  = `Bullish RSI divergence: price made lower low, RSI held higher — momentum not confirming the selloff.${nearSup ? ' Near support.' : ''}${r.mfi != null ? ` MFI ${r.mfi} (${mfiLow ? 'oversold' : 'recovering'}).` : ''} ${setup.str}`;
+  return { type: 'DIVERGENCE_REVERSAL', headline: `Bullish divergence + ${cnt}/3 reversal signals`, note, extra: setup };
 }
 
 function sigInsider(r, ctx) {
@@ -3192,7 +3189,6 @@ function generatePostMortem(track, milestones) {
   if (track.rsi < 52 && outcome === 'LOSS') flags.push(`RSI ${track.rsi?.toFixed(1)} below 52 — bullish threshold not confirmed`);
   if ((track.vol_ratio ?? 0) < 1.0)         flags.push(`Volume ${track.vol_ratio}× below average at entry — weak confirmation`);
   if (track.market_regime === 'bear')        flags.push('Market regime was bearish — this signal underperforms in bear regimes');
-  if ((track.whale_score ?? 0) < 4)         flags.push('Whale score below 4 — limited institutional backing');
   if (m1.drawdown_pct < -8)                 flags.push(`Touched -${Math.abs(m1.drawdown_pct.toFixed(1))}% before recovery — stop was appropriate`);
   const verdict = flags.length
     ? `${flags.length} flag${flags.length>1?'s':''} at entry: ${flags.join('; ')}.`
