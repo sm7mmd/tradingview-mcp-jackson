@@ -29,9 +29,8 @@ export async function fetchGoogleNews(query, hl = 'en', gl = 'SA', ceid = 'SA:en
   return items;
 }
 
-// finnhubToken was previously read from state.settings?.finnhub_token; now a param.
-export async function getEarningsCalendar(sym, finnhubToken) {
-  const token = finnhubToken;
+// token was previously read from state.settings?.finnhub_token; now passed by the caller.
+export async function getEarningsCalendar(sym, token) {
   if (!token) return null;
   const base = sym.includes(":") ? sym.split(":")[1] : sym;
   const today = new Date().toISOString().split("T")[0];

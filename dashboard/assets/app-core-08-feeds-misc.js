@@ -1,3 +1,4 @@
+// ── Macro Calendar ────────────────────────────────────────────────────────────
 const TYPE_LABELS = { fed:'Fed', sama:'SAMA', opec:'OPEC+', cpi:'CPI', nfp:'Jobs', earnings:'Earnings', holiday:'Holiday', macro:'Saudi Macro' };
 
 function dayLabel(dateStr) {

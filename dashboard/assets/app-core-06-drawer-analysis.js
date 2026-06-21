@@ -1,3 +1,5 @@
+// ─── Drawer tab builders ──────────────────────────────────────────────────────
+// ─── 360° Analysis ────────────────────────────────────────────────────────────
 function get360TechPillar(r) {
   const bull = ['STRONG BUY','BUY','WATCH'].includes(r.bias);
   const bear = ['STRONG SELL','SELL','AVOID'].includes(r.bias);

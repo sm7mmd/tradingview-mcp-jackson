@@ -1,3 +1,6 @@
+// ────────────────────────────────────────────────────────────────────────────
+// Tabs / filters
+// ────────────────────────────────────────────────────────────────────────────
 function switchTab(name,btn){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -450,5 +453,3 @@ async function runPortfolioBt() {
   } catch(e) { el.innerHTML = `<div style="color:var(--red)">${e.message}</div>`; }
   finally { if (btn) { btn.textContent = '▶ Run'; btn.disabled = false; } }
 }
-
-// ── Calendar ──────────────────────────────────────────────────────────────────

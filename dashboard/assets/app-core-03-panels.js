@@ -1,3 +1,4 @@
+// ── Calendar ──────────────────────────────────────────────────────────────────
 const calCache={};
 async function fetchCalendar(sym){
   if(calCache[sym]!==undefined) return calCache[sym];

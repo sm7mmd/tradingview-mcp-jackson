@@ -693,5 +693,3 @@ async function loadAutoScanStatus() {
 }
 
 setInterval(loadAutoScanStatus, 60 * 1000); // refresh every minute
-
-// ── Macro Calendar ────────────────────────────────────────────────────────────

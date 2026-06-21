@@ -1,3 +1,4 @@
+// ─── Dividend tracker ─────────────────────────────────────────────────────────
 const divCache={};
 async function fetchDividends(sym){
   if(divCache[sym]!==undefined) return divCache[sym];
@@ -1044,6 +1045,3 @@ function buildDeltaCallout(d, r){
     ${metricRows}
   </div>`;
 }
-
-// ─── Drawer tab builders ──────────────────────────────────────────────────────
-// ─── 360° Analysis ────────────────────────────────────────────────────────────
