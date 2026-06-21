@@ -29,6 +29,7 @@ import { getStrategyValidation, bustCache as bustStrategyCache } from "./strateg
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
 import { sendTelegram } from "./notify.mjs";
 import { getUpcomingEvents } from "./macro.mjs";
+import { fetchGoogleNews, getEarningsCalendar, newsCache, NEWS_TTL } from "./news.mjs";
 
 const __dirname      = dirname(fileURLToPath(import.meta.url));
 const PORT           = process.env.PORT || 3000;
@@ -114,49 +115,6 @@ const OVERVIEW_SYMBOLS = [
 ];
 let overviewCache = { data: null, ts: 0 };
 const OVERVIEW_TTL = 20 * 60 * 1000;
-
-// ── Finnhub Calendar ──────────────────────────────────────────────────────────
-async function getEarningsCalendar(sym) {
-  const token = state.settings?.finnhub_token;
-  if (!token) return null;
-  const base = sym.includes(":") ? sym.split(":")[1] : sym;
-  const today = new Date().toISOString().split("T")[0];
-  const ahead = new Date(Date.now() + 35 * 864e5).toISOString().split("T")[0];
-  try {
-    const r = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${today}&to=${ahead}&symbol=${base}&token=${token}`);
-    const d = await r.json();
-    return d?.earningsCalendar?.[0] || null;
-  } catch (_) { return null; }
-}
-
-// ── Google News RSS ────────────────────────────────────────────────────────────
-const newsCache = new Map();
-const NEWS_TTL  = 30 * 60 * 1000;
-
-async function fetchGoogleNews(query, hl = 'en', gl = 'SA', ceid = 'SA:en') {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return [];
-  const xml = await res.text();
-  const items = [];
-  const re = /<item>([\s\S]*?)<\/item>/g;
-  let m;
-  while ((m = re.exec(xml)) !== null) {
-    const block = m[1];
-    const title   = (block.match(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/) || block.match(/<title>([^<]+)<\/title>/))?.[1]?.trim() || '';
-    const link    = block.match(/<link>([^<]+)<\/link>/)?.[1]?.trim() || block.match(/<guid[^>]*>([^<]+)<\/guid>/)?.[1]?.trim() || '';
-    const pubDate = block.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1]?.trim() || '';
-    const source  = (block.match(/<source[^>]*>([^<]+)<\/source>/) || block.match(/<source[^>]*\/?>/))?.[1]?.trim() || '';
-    if (title && link) {
-      items.push({ title, url: link, source, published: pubDate, lang: hl === 'ar' ? 'ar' : 'en' });
-      if (items.length >= 8) break;
-    }
-  }
-  return items;
-}
 
 // ── SSE broadcast ─────────────────────────────────────────────────────────────
 const sseClients = new Set();
@@ -1652,7 +1610,7 @@ const server = createServer(async (req, res) => {
   if (path === "/api/calendar" && method === "GET") {
     const sym = url.searchParams.get("sym");
     if (!sym) return json(res, { error: "sym required" }, 400);
-    const event = await getEarningsCalendar(sym);
+    const event = await getEarningsCalendar(sym, state.settings?.finnhub_token);
     return json(res, { event });
   }
 
@@ -2738,7 +2696,7 @@ const server = createServer(async (req, res) => {
 
     // 12. Earnings proximity (requires Finnhub token; auto-passes if no data)
     let earningsEvent = null;
-    try { earningsEvent = await getEarningsCalendar(sym); } catch (_) {}
+    try { earningsEvent = await getEarningsCalendar(sym, state.settings?.finnhub_token); } catch (_) {}
     let earningsOk = true, earningsDays = null, earningsDetail = 'No earnings data available (Finnhub token not set or TASI stock) — skipping';
     if (earningsEvent?.date) {
       earningsDays = Math.round((new Date(earningsEvent.date) - Date.now()) / 864e5);
