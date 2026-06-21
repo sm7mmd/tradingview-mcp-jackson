@@ -114,7 +114,10 @@ async function main() {
   console.log(`\n  ACCOUNT   ${fmtSar(ACCT)}  →  deploy ${fmtSar(sar.totalDeployed)}` +
     `  ·  ${fmtSar(sar.perName)}/name  ·  ${fmtSar(sar.cash)} cash`);
 
-  console.log(`\n  NEXT REBALANCE  ${r.nextRebalance}   ← re-run this on that morning before trading`);
+  console.log(`\n  NEXT REBALANCE  ${r.nextRebalance}   (suggested monthly anchor — NOT a gate)`);
+  console.log(`            The edge is the MONTHLY cycle, not the date. Starting fresh? Enter today,`);
+  console.log(`            then lock to a fixed cadence (re-run on the 1st each month). The 6-month`);
+  console.log(`            momentum signal is slow — today's picks ≈ the 1st's, so rushing gains little.`);
 
   // Trades
   const t = r.turnover || { buy: [], hold: [], sell: [] };
