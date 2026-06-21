@@ -14,6 +14,7 @@ import { getUpcomingEvents } from '../dashboard/macro.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
+import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -490,5 +491,57 @@ describe('getUpcomingEvents — date-window filter', () => {
   });
   it('a wider window returns at least as many events as a narrow one', () => {
     assert.ok(getUpcomingEvents(400).length >= getUpcomingEvents(7).length);
+  });
+});
+
+// ── compounding_geometry sizing levers (pure) ─────────────────────────────────
+describe('compounding_geometry levers', () => {
+  // annualizedVol: stdev of daily returns × sqrt(252)
+  it('annualizedVol scales daily stdev by sqrt(252)', () => {
+    assert.equal(annualizedVol([0.01, 0.01, 0.01]), 0); // zero stdev → zero vol
+    const v = annualizedVol([0.01, -0.01]); // sample-stdev 0.0141421 × sqrt(252) ≈ 0.2245
+    assert.ok(Math.abs(v - 0.2245) < 0.01, `got ${v}`);
+  });
+  it('annualizedVol returns null for <2 points', () => {
+    assert.equal(annualizedVol([]), null);
+    assert.equal(annualizedVol([0.01]), null);
+  });
+
+  it('convictionWeights sum to 1 and favor higher momentum', () => {
+    // cap 0.5 is feasible for 3 names (0.5×3=1.5≥1) so rank-linear applies
+    const w = convictionWeights([0.30, 0.10, 0.20], { maxWeight: 0.5 }); // best idx0, worst idx1
+    assert.ok(Math.abs(w.reduce((a, b) => a + b, 0) - 1) < 1e-9);
+    assert.ok(w[0] > w[2] && w[2] > w[1], `expected w0>w2>w1, got ${w}`);
+  });
+  it('convictionWeights respects maxWeight cap', () => {
+    const w = convictionWeights([10, 1, 1, 1, 1], { maxWeight: 0.25 });
+    assert.ok(Math.max(...w) <= 0.25 + 1e-9, `max=${Math.max(...w)}`);
+    assert.ok(Math.abs(w.reduce((a, b) => a + b, 0) - 1) < 1e-9);
+  });
+  it('convictionWeights falls back to equal weight when cap is infeasible', () => {
+    const w = convictionWeights([3, 2, 1], { maxWeight: 0.25 }); // 3×0.25=0.75<1
+    assert.ok(w.every(x => Math.abs(x - 1 / 3) < 1e-9), `got ${w}`);
+  });
+  it('convictionWeights handles 0 and 1 names', () => {
+    assert.deepEqual(convictionWeights([]), []);
+    assert.deepEqual(convictionWeights([0.5]), [1]);
+  });
+
+  it('drawdownBrake trips below -threshold and halves exposure', () => {
+    const r = drawdownBrake({ eq: 0.80, peak: 1.0, braked: false, threshold: 0.15 });
+    assert.equal(r.braked, true);
+    assert.equal(r.mult, 0.5);
+  });
+  it('drawdownBrake stays off above -threshold', () => {
+    const r = drawdownBrake({ eq: 0.90, peak: 1.0, braked: false, threshold: 0.15 });
+    assert.equal(r.braked, false);
+    assert.equal(r.mult, 1);
+  });
+  it('drawdownBrake releases only after recovering past -threshold*recoverFrac', () => {
+    const a = drawdownBrake({ eq: 0.88, peak: 1.0, braked: true, threshold: 0.15, recoverFrac: 0.5 });
+    assert.equal(a.braked, true); // -12% still below -7.5% release line
+    const b = drawdownBrake({ eq: 0.95, peak: 1.0, braked: true, threshold: 0.15, recoverFrac: 0.5 });
+    assert.equal(b.braked, false); // -5% above release line
+    assert.equal(b.mult, 1);
   });
 });
