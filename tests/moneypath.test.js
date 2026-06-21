@@ -15,6 +15,7 @@ import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
 import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/compounding_geometry.mjs';
+import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -543,5 +544,32 @@ describe('compounding_geometry levers', () => {
     const b = drawdownBrake({ eq: 0.95, peak: 1.0, braked: true, threshold: 0.15, recoverFrac: 0.5 });
     assert.equal(b.braked, false); // -5% above release line
     assert.equal(b.mult, 1);
+  });
+});
+
+// ── index_flow helpers (pure) ─────────────────────────────────────────────────
+describe('index_flow helpers', () => {
+  it('windowReturn computes simple return over an index window', () => {
+    const c = [100, 110, 121];
+    assert.ok(Math.abs(windowReturn(c, 0, 2) - 0.21) < 1e-9, `got ${windowReturn(c, 0, 2)}`);
+    assert.equal(windowReturn(c, 0, 0), 0);
+  });
+  it('windowReturn returns null on bad bounds or non-positive prices', () => {
+    assert.equal(windowReturn([0, 110, 121], 0, 2), null); // zero endpoint price
+    assert.equal(windowReturn([100], 0, 3), null);          // out of range
+  });
+  it('abnormalReturn = name return minus benchmark return over the same window', () => {
+    const name = [100, 130], bench = [100, 110]; // +30% vs +10%
+    assert.ok(Math.abs(abnormalReturn(name, bench, 0, 1) - 0.20) < 1e-9, `got ${abnormalReturn(name, bench, 0, 1)}`);
+  });
+  it('abnormalReturn returns null if either leg is unavailable', () => {
+    assert.equal(abnormalReturn([100, 130], [100], 0, 1), null);
+  });
+  it('sliceByDate finds the index on-or-after a target date', () => {
+    const dates = ['2024-01-01', '2024-01-03', '2024-01-05'];
+    assert.equal(sliceByDate(dates, '2024-01-03'), 1);   // exact
+    assert.equal(sliceByDate(dates, '2024-01-02'), 1);   // next on-or-after
+    assert.equal(sliceByDate(dates, '2024-01-06'), -1);  // past end
+    assert.equal(sliceByDate(dates, '2023-12-31'), 0);   // before start → first
   });
 });
