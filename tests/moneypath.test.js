@@ -7,7 +7,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { scoreBias, computeSeasonality } from '../scripts/tasi_screener.mjs';
+import { scoreBias, computeSeasonality, volumeCheck, detectDivergence, findSRLevels } from '../scripts/tasi_screener.mjs';
 import { logSignal, gradePending } from '../dashboard/validation.mjs';
 import { buildStatusWhy } from '../dashboard/strategy_validation.mjs';
 import { schemeDExposure, sizingNote } from '../dashboard/momentum_screen.mjs';
@@ -214,5 +214,74 @@ describe('sizingNote — disambiguates the two zero-exposure causes', () => {
   it('deployed decaying (stateMult 0.5) → notes it is HALVED', () => {
     const r = sizingNote({ exposure: 0.3, exposurePct: 30, stateMult: 0.5, inSeason: true, nHoldings: 5 });
     assert.match(r, /HALVED because the strategy is decaying/);
+  });
+});
+
+// ── volumeCheck (confirmation threshold; TASI 1.2× vs others 1.5×) ───────────
+describe('volumeCheck — surge vs 20-day average', () => {
+  const flat = Array(19).fill(100);   // 19 bars of 100 → sma20 over last 20
+  it('null when fewer than 20 bars', () => {
+    assert.deepEqual(volumeCheck([1, 2, 3]), { ratio: null, ok: false });
+  });
+  it('ratio = last / 20-day SMA, ok at ≥1.5× (non-TASI default)', () => {
+    const r = volumeCheck([...flat, 200]);   // sma20 = (19*100+200)/20 = 105, ratio 1.9
+    assert.equal(r.ratio, 1.9);
+    assert.equal(r.ok, true);
+    assert.equal(r.baseThreshold, 1.5);
+  });
+  it('1.3× clears the TASI 1.2 threshold but NOT the 1.5 default', () => {
+    const vols = [...flat, 130];             // sma 101.5, ratio ≈1.28
+    assert.equal(volumeCheck(vols, false).ok, false); // 1.5 threshold
+    assert.equal(volumeCheck(vols, true).ok, true);   // TASI 1.2 threshold
+    assert.equal(volumeCheck(vols, true).baseThreshold, 1.2);
+  });
+});
+
+// ── detectDivergence (bullish/bearish RSI vs price) ─────────────────────────
+describe('detectDivergence — price vs RSI', () => {
+  it('null when not enough bars', () => {
+    assert.equal(detectDivergence([1, 2, 3], [40, 41, 42]), null);
+  });
+  // needs ≥ lookback+5 = 35 bars; only the last 30 are split in half (15/15).
+  const pad = (x) => Array(5).fill(x);
+  it('bullish: price lower-low while RSI higher-low', () => {
+    const closes = [...pad(100), ...Array(15).fill(100), ...Array(15).fill(95)];
+    const rsi = [...pad(30), ...Array(15).fill(30), ...Array(15).fill(40)];
+    assert.equal(detectDivergence(closes, rsi), 'bullish');
+  });
+  it('bearish: price higher-high while RSI lower-high', () => {
+    const closes = [...pad(100), ...Array(15).fill(100), ...Array(15).fill(105)];
+    const rsi = [...pad(70), ...Array(15).fill(70), ...Array(15).fill(60)];
+    assert.equal(detectDivergence(closes, rsi), 'bearish');
+  });
+  it('no divergence when price & RSI agree', () => {
+    const closes = [...pad(100), ...Array(15).fill(100), ...Array(15).fill(110)];
+    const rsi = [...pad(50), ...Array(15).fill(50), ...Array(15).fill(65)];
+    assert.equal(detectDivergence(closes, rsi), null);
+  });
+});
+
+// ── findSRLevels (swing pivots → support/resistance) ────────────────────────
+describe('findSRLevels — swing support/resistance', () => {
+  it('finds a resistance pivot above price and support below', () => {
+    // build a series with a clear swing-high at idx 10 (120) and swing-low at idx 20 (80),
+    // ending below the high and above the low so both classify.
+    const highs = [], lows = [], closes = [];
+    for (let i = 0; i < 31; i++) {
+      let h = 100, l = 98;
+      if (i === 10) { h = 120; l = 118; }       // swing high
+      if (i === 20) { h = 82;  l = 80;  }        // swing low
+      highs.push(h); lows.push(l); closes.push(i === 30 ? 100 : (h + l) / 2);
+    }
+    const sr = findSRLevels(highs, lows, closes, 5);
+    assert.ok(sr.resistance.includes(120), `resistance ${JSON.stringify(sr.resistance)}`);
+    assert.ok(sr.support.includes(80), `support ${JSON.stringify(sr.support)}`);
+  });
+  it('separates levels by side of current price', () => {
+    const sr = findSRLevels(
+      Array(31).fill(100), Array(31).fill(100), Array(31).fill(100), 5);
+    // flat series → no pivots that beat neighbors strictly enough on both sides
+    assert.deepEqual(sr.support, []);
+    assert.deepEqual(sr.resistance, []);
   });
 });
