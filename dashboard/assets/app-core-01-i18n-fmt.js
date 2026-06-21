@@ -504,8 +504,8 @@ function setViewMode(mode) {
 }
 
 const BEG_BIAS_PLAIN = {
-  'STRONG BUY' : 'Very strong signal — nearly all checks passed. High-conviction buy.',
-  'BUY'        : 'Good signal — most checks passed. Solid opportunity.',
+  'STRONG BUY' : 'Strong uptrend state — nearly all checks aligned. Descriptive only, not a buy signal (lagged buy-and-hold in testing). Validated buy-list = Momentum tab.',
+  'BUY'        : 'Uptrend state — most checks aligned. Descriptive context, not a buy signal.',
   'WATCH'      : 'Interesting but not ready yet. Keep an eye on it.',
   'SKIP'       : 'No signal — not worth acting on right now.',
   'AVOID'      : 'Early weakness detected. Do not buy.',

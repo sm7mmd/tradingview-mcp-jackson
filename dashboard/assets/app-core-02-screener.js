@@ -221,7 +221,9 @@ let eventSource = null;
 
 function connectSSE(){
   if(eventSource) return;
-  eventSource = new EventSource('/api/events');
+  // EventSource can't set the Authorization header — pass the JWT as a query param.
+  const _t = localStorage.getItem('mawjah_jwt') || '';
+  eventSource = new EventSource('/api/events' + (_t ? '?token=' + encodeURIComponent(_t) : ''));
   eventSource.onmessage = e => {
     try{
       const d = JSON.parse(e.data);

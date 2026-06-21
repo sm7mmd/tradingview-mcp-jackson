@@ -98,7 +98,7 @@ async function loadPlaybook() {
                    :                                'Dominant regime: Neutral/Range — no clear directional edge. Trade smaller, tighter stops.';
     const riskTip  = d.risk_posture === 'Aggressive' ? 'Conditions support larger position sizes and more active trading — strong bull regime with high breadth.'
                    : d.risk_posture === 'Defensive'  ? 'Risk-off posture recommended — reduce position sizes, protect profits, and avoid new setups.'
-                   :                                   'Be selective — only the highest-conviction setups (score 7+) justify new entries right now.';
+                   :                                   'Mixed conditions — only the strongest trend-alignment scores (7+) stand out. Descriptive context, not a buy signal; the validated buy-list is the Momentum tab.';
 
     // Header strip
     const header = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -148,7 +148,7 @@ async function loadPlaybook() {
         </div>`;
       }).join('');
       setupsHtml = `<div style="margin-bottom:12px">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px" title="Top Setups::The highest-conviction buy signals from the last scan — at least score 6+, rising or stable momentum, grouped by market. Click any card to open the full analysis.">Top Setups</div>
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px" title="Strongest Trends::Highest trend-alignment scores from the last scan (6+, rising/stable momentum), grouped by market. Descriptive trend state, NOT a buy list (lagged buy-and-hold in testing). Validated buy-list = Momentum tab. Click a card for the full analysis.">Strongest Trends</div>
         ${mktSections}
       </div>`;
     }
@@ -227,7 +227,7 @@ function renderMarketsPanel(d){
 
 // ── Opportunity signal definitions (mirrors server SIGNAL_DEFS) ──────────────
 const OPP_DEFS = {
-  STRONG_BUY_CONFIRMED:     { label:'Signal Confirmed',    icon:'✅', color:'#00c853', bg:'rgba(0,200,83,.13)',    tip:'Signal Confirmed::Score 7+ across all criteria — every major filter (trend, momentum, volume, weekly) is aligned. Highest conviction setup in the screener.' },
+  STRONG_BUY_CONFIRMED:     { label:'Signal Confirmed',    icon:'✅', color:'#00c853', bg:'rgba(0,200,83,.13)',    tip:'Signal Confirmed::Score 7+ across all criteria — every major filter (trend, momentum, volume, weekly) is aligned. Strongest trend-alignment state in the screener — descriptive, not a buy signal (validated buy-list = Momentum tab).' },
   MTF_CONFLUENCE:           { label:'Multi-TF Confluence', icon:'🎯', color:'#16a34a', bg:'rgba(22,163,74,.13)',   tip:'Multi-TF Confluence::The same bullish signal is confirmed on both the daily and weekly timeframe. Two timeframes pointing the same direction = higher probability of follow-through.' },
   PRE_BREAKOUT_COIL:        { label:'Pre-Breakout Coil',   icon:'🌀', color:'#3d8bff', bg:'rgba(61,139,255,.13)', tip:'Pre-Breakout Coil::Volatility (ATR) is compressed into its bottom 25% — the stock is in a "coil." Compressed volatility historically precedes sharp moves. Score is rising and volume is starting to pick up.' },
   SMART_MONEY_ACCUMULATION: { label:'Smart Money',         icon:'🐳', color:'#0891b2', bg:'rgba(8,145,178,.13)',  tip:'Smart Money::Unusual institutional-scale activity detected — block deals, CMA filings, or insider buying — alongside a valid technical setup. The big money is moving before the price does.' },

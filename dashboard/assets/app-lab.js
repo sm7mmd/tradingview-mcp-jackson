@@ -131,8 +131,8 @@
   };
   // exact-text signal words (matched only on small tag/badge elements to stay safe)
   const SIG = {
-    'strong buy': 'STRONG BUY::Highest-conviction buy — the most signals agree. Still just one input, not a guarantee.',
-    'buy': 'BUY::A positive signal, weaker than STRONG BUY.',
+    'strong buy': 'STRONG BUY::Most criteria aligned — descriptive trend state, not a buy signal (lagged buy-and-hold in testing). Validated buy-list = Momentum tab.',
+    'buy': 'BUY::Uptrend state, weaker than STRONG BUY — descriptive, not a buy signal.',
     'neutral': 'NEUTRAL::No clear edge either way — the engine has no strong opinion.',
     'hold': 'HOLD::Stay put — no action suggested right now.',
     'sell': 'SELL::A negative signal — the engine sees weakness.',

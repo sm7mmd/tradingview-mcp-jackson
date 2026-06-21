@@ -633,7 +633,7 @@ function showTradeChecklist(r, onConfirm){
   // 1. Score
   const score=r?.score??0; const maxScore=r?.maxScore??8;
   const scoreOk=score>=(isBear?6:5);
-  items.push({cls:scoreOk?'cl-pass':'cl-fail',icon:scoreOk?'✓':'✗',label:`Score: ${score}/${maxScore}`,detail:scoreOk?`${isBear?'Bear':'Bull'} criteria met`:`Below minimum — ${isBear?6:5}/${maxScore} needed for high-conviction entry`});
+  items.push({cls:scoreOk?'cl-pass':'cl-fail',icon:scoreOk?'✓':'✗',label:`Score: ${score}/${maxScore}`,detail:scoreOk?`${isBear?'Bear':'Bull'} criteria met`:`Below minimum — ${isBear?6:5}/${maxScore} needed to meet the trend-alignment threshold`});
   // 2. Volume
   const volOk=(r?.vol_ratio??0)>=1.2;
   items.push({cls:volOk?'cl-pass':'cl-warn',icon:volOk?'✓':'⚠',label:`Volume: ${r?.vol_ratio??'—'}×`,detail:volOk?'Above 1.2× average — confirms institutional participation':'Below 1.2× — thin volume, entry may not have conviction'});

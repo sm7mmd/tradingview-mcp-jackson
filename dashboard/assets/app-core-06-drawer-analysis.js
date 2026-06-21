@@ -134,7 +134,7 @@ function generate360Synthesis(r, tech, fund, whale) {
 
   if (bullCount === 3) {
     headline = 'Full alignment — all three dimensions confirm bullish';
-    body = `Technical momentum is confirmed (${r.score}/8), the stock is ${fund.signal.toLowerCase()} on fundamentals, and institutional flow shows ${whale.signal.toLowerCase()} (${whale.sub}). This rare three-way convergence signals a high-conviction opportunity.${bdCtx()}`;
+    body = `Technical momentum is confirmed (${r.score}/8), the stock is ${fund.signal.toLowerCase()} on fundamentals, and institutional flow shows ${whale.signal.toLowerCase()} (${whale.sub}). This rare three-way convergence is the strongest trend-alignment state — descriptive, not a buy signal (the 9-pt score lagged buy-and-hold in testing). Validated buy-list = Momentum tab.${bdCtx()}`;
     action = `<strong>Consider entry</strong> near EMA 34 (${r.emas?.ema34?.toFixed(2)??'—'}). Both ATR-based and EMA 89 structure stops are valid. Preferred target: T2 at 2:1 R:R.`;
   } else if (bearCount === 3) {
     headline = 'Full alignment — all three dimensions confirm bearish';
@@ -342,7 +342,7 @@ function buildDynamicsCard(r) {
     const isTrend = H > 0.55, isMR = H < 0.45, isCoil = rank <= 20, isExp = rank >= 80;
     let synth, synthCol;
     if (isTrend && isCoil) {
-      synth = '⭐ Best-case setup: trending character + compressed volatility. The stock is building energy in a confirmed trend direction. High-conviction entry if the signal score is 7+.';
+      synth = '⭐ Best-case character: trending + compressed volatility. The stock is building energy in a confirmed trend direction. Strongest trend-alignment when the score is 7+ — descriptive, not a buy signal (validated buy-list = Momentum tab).';
       synthCol = 'var(--green)';
     } else if (isTrend && isExp) {
       synth = '⚠ Trending but volatile: momentum is real, but risk per bar is elevated. Size down 30–40%, widen stops, and consider waiting for an intra-day pullback to reduce entry risk.';

@@ -1192,7 +1192,9 @@ const server = createServer(async (req, res) => {
   // ── Protect /api/* routes ────────────────────────────────────────────────────
   if (path.startsWith('/api/')) {
     const authHeader = req.headers['authorization'] || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.headers['x-api-key'] || '');
+    // EventSource (SSE) can't set headers — accept ?token= for the event stream.
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7)
+      : (req.headers['x-api-key'] || url.searchParams.get('token') || '');
     let authorized = false;
 
     // 1. Accept legacy API key
