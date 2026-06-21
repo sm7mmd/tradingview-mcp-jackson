@@ -19,6 +19,7 @@ import { annualizedVol, convictionWeights, drawdownBrake } from '../dashboard/co
 import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_flow.mjs';
 import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
 import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
+import { portfolioGuillotine, tstat as gTstat } from '../dashboard/guillotine.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -644,6 +645,54 @@ describe('contract_flow helpers', () => {
     assert.equal(isContractHeadline(null), false);
     assert.equal(isContractHeadline('CO. ANNOUNCES A TENDER WIN'), true);
     assert.equal(isContractHeadline('Co. announces a PURCHASE ORDER receipt'), true);
+  });
+});
+
+// ── portfolioGuillotine: the shared "validated" gate ──────────────────────────
+describe('portfolioGuillotine gate', () => {
+  const alt = (a, b, pairs) => Array.from({ length: pairs * 2 }, (_, i) => i % 2 ? b : a);
+  it('tstat sign + magnitude on a tight positive series', () => {
+    const t = gTstat(alt(0.008, 0.012, 20));   // mean 0.01, small sd
+    assert.ok(t > 10, `expected large positive t, got ${t}`);
+  });
+  it('PASS: positive mean, t>2, enough periods', () => {
+    const v = portfolioGuillotine(alt(0.008, 0.012, 20));
+    assert.equal(v.pass, true);
+    assert.ok(v.t > 2);
+    assert.ok(v.excessPerPeriod > 0);
+    assert.equal(v.periods, 40);
+  });
+  it('FAIL: zero-mean noise (t≈0)', () => {
+    const v = portfolioGuillotine(alt(0.05, -0.05, 20));
+    assert.equal(v.pass, false);
+    assert.match(v.reason, /t .*≤ 2|not positive/);
+  });
+  it('FAIL: positive mean but insignificant (high variance, t<2)', () => {
+    const v = portfolioGuillotine(alt(0.1, -0.09, 20));   // mean +0.005, huge sd
+    assert.equal(v.pass, false);
+    assert.ok(v.excessPerPeriod > 0);
+    assert.ok(v.t < 2);
+  });
+  it('FAIL: negative mean', () => {
+    const v = portfolioGuillotine(alt(-0.008, -0.012, 20));
+    assert.equal(v.pass, false);
+    assert.match(v.reason, /not positive/);
+  });
+  it('FAIL: too few periods (underpowered)', () => {
+    const v = portfolioGuillotine([0.02, 0.02, 0.02]);   // < minPeriods 12
+    assert.equal(v.pass, false);
+    assert.match(v.reason, /underpowered/);
+  });
+  it('FAIL: relative-only (excess significant but absolute negative)', () => {
+    const v = portfolioGuillotine(alt(0.008, 0.012, 20), { abs: Array(40).fill(-0.005) });
+    assert.equal(v.pass, false);
+    assert.match(v.reason, /relative-only/);
+  });
+  it('FAIL: does not beat its control', () => {
+    const v = portfolioGuillotine(alt(0.008, 0.012, 20), { controlExcess: Array(40).fill(0.02) });
+    assert.equal(v.pass, false);
+    assert.equal(v.beatsControl, false);
+    assert.match(v.reason, /beat its control/);
   });
 });
 

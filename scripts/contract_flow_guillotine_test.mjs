@@ -19,12 +19,10 @@ import { getBars, warm, iso } from './bars_cache.mjs';
 import { toYahooSym, TASI_STOCKS } from './tasi_screener.mjs';
 import { db } from '../dashboard/db.js';
 import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
+import { mean, tstat, portfolioGuillotine } from '../dashboard/guillotine.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011, SLIP = +process.env.SLIP || 0.0015;
 const START = '2021-07-01';   // contract history begins 2021-06; first full period after
-const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
-const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
-const tstat = a => a.length > 1 ? mean(a) / (sd(a) / Math.sqrt(a.length)) : NaN;
 const pct = x => isNaN(x) || x == null ? '—' : (x * 100).toFixed(2) + '%';
 
 async function main() {
@@ -103,10 +101,12 @@ async function main() {
   row('private — liquid half', XpL);
   console.log(`\n  govt−private spread (liquid, paired): mean ${pct(mean(spread))}  t ${(tstat(spread) || 0).toFixed(2)}  (n=${spread.length} periods)`);
 
-  const tG = tstat(XgL), pass = mean(XgL) > 0 && tG > 2 && mean(spread) > 0;
-  console.log(`\nVERDICT (govt ∩ liquid, the validated cut):`);
-  console.log(`  ${pass ? 'SURVIVES the guillotine' : 'FAILS the guillotine'} — excess/pd ${pct(mean(XgL))}, t ${(tG || 0).toFixed(2)} (need >2), beats private ${mean(spread) > 0}.`);
-  if (!pass) console.log(`  → the pooled-NW SIGNAL did NOT hold under the cross-clustering-robust test. Downgrade to "suggestive", not a 2nd edge.`);
+  // Authoritative verdict via the SHARED gate (the one bar every signal must clear).
+  const verdict = portfolioGuillotine(XgL, { controlExcess: XpL });
+  console.log(`\nVERDICT (govt ∩ liquid, the validated cut) — via shared portfolioGuillotine():`);
+  console.log(`  ${verdict.reason}`);
+  console.log(`  beats private control: ${verdict.beatsControl}; govt−private paired spread t ${(tstat(spread) || 0).toFixed(2)}`);
+  if (!verdict.pass) console.log(`  → the pooled-NW SIGNAL did NOT hold under the cross-clustering-robust test. NOT an edge.`);
   process.exit(0);
 }
 main();
