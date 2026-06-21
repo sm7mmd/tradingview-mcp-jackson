@@ -26,14 +26,12 @@ import {
   calcMFI, calcVolumeZScore,
 } from './tasi_screener.mjs';
 import { getShariaStatus } from '../dashboard/sharia.mjs';
+import { mean, sd, tstat, portfolioGuillotine } from '../dashboard/guillotine.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
 const START = '2020-01-01', COVID0 = '2020-02-20', COVID1 = '2021-03-31';
 const inCovid = d => d >= COVID0 && d <= COVID1;
-const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
-const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
-const tstat = a => a.length > 1 ? mean(a) / (sd(a) / Math.sqrt(a.length)) : NaN;
 const pct = x => isNaN(x) ? '—' : (x * 100).toFixed(2) + '%';
 
 function calcWhaleScore(mfi, obvTrend, volRatio, zScore, bias) {
@@ -143,6 +141,14 @@ async function main() {
     console.log(`  ${label.padEnd(16)} ${String(a.length).padStart(4)} ${String(an).padStart(5)}  ${pct(mean(a)).padStart(7)} ${pct(cagr(a)).padStart(7)}  ${pct(mean(x)).padStart(9)} ${(k === 'basket' ? '—' : tstat(x).toFixed(2)).padStart(6)} ${winx(x).padStart(5)} ${pct(ddOf(a)).padStart(7)}`);
   }
   console.log(`\n  PASS bar: EXCESS t > 2 AND positive ABS. This t already absorbs cross-name clustering (the 9-pt killer).`);
+
+  // Authoritative verdict via the SHARED gate (dashboard/guillotine.mjs) — the one bar for all signals.
+  console.log(`\n  === portfolioGuillotine verdicts ===`);
+  for (const [k, label] of order) {
+    if (k === 'basket' || !S[k].length) continue;
+    const v = portfolioGuillotine(Sx[k], { abs: S[k] });
+    console.log(`  ${label.padEnd(16)} ${v.reason}`);
+  }
   process.exit(0);
 }
 main();

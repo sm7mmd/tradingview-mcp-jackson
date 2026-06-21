@@ -13,9 +13,8 @@ import { getBars, warm, iso } from './bars_cache.mjs';
 import { toYahooSym, TASI_STOCKS } from './tasi_screener.mjs';
 import { getShariaStatus } from '../dashboard/sharia.mjs';
 import { db } from '../dashboard/db.js';
+import { mean, sd, portfolioGuillotine } from '../dashboard/guillotine.mjs';
 
-const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
-const sd = a => { if (a.length < 2) return NaN; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
 const pct = x => isNaN(x) ? '—' : (x * 100).toFixed(2) + '%';
 const cum = a => a.reduce((v, r) => v * (1 + r), 1) - 1;
 const cagrM = a => Math.pow(1 + cum(a), 12 / a.length) - 1;
@@ -69,7 +68,9 @@ async function main() {
     for (const RT of [0.0011, 0.0030]) {
       const cm = mean(turn) * RT, net = abs.map(x => x - cm), ex = net.map((x, i) => x - basketM[i]);
       const mid = Math.floor(ex.length / 2); const oos = mean(ex.slice(0, mid)) > 0 && mean(ex.slice(mid)) > 0;
-      console.log(`  ${label.padEnd(13)} cost ${RT === 0.0011 ? '0.11%(Derayah)' : '0.30%(buffer) '}: ABS CAGR ${pct(cagrM(net)).padStart(8)}  maxDD ${pct(maxDD(net)).padStart(8)}  Sharpe ${String(sharpe(net)).padStart(4)}  excess ${pct(mean(ex) * 12).padStart(8)}/yr  NWt ${String(nwT(ex)).padStart(5)}  OOS ${oos ? 'Y' : 'n'}`);
+      // ex = per-month (non-overlapping) excess series → the cross-clustering-robust unit the gate wants.
+      const gate = portfolioGuillotine(ex, { abs: net });
+      console.log(`  ${label.padEnd(13)} cost ${RT === 0.0011 ? '0.11%(Derayah)' : '0.30%(buffer) '}: ABS CAGR ${pct(cagrM(net)).padStart(8)}  maxDD ${pct(maxDD(net)).padStart(8)}  Sharpe ${String(sharpe(net)).padStart(4)}  excess ${pct(mean(ex) * 12).padStart(8)}/yr  NWt ${String(nwT(ex)).padStart(5)}  OOS ${oos ? 'Y' : 'n'}  GATE ${gate.pass ? 'PASS' : 'fail'}(t ${gate.t.toFixed(2)})`);
     }
   }
 
