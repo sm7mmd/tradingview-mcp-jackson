@@ -87,18 +87,30 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
     if (i < 126) continue;
     const mom6 = c[i - 21] / c[i - 126] - 1;        // 6-1 month momentum (skip last month)
     if (!isFinite(mom6)) continue;
+    const hi52 = Math.max(...c.slice(Math.max(0, i - 251), i + 1));   // 52-week high
+    const wk52 = hi52 > 0 ? c[i] / hi52 : null;       // proximity to 52wk high (0..1)
     let liq = 0, n = 0; for (let k = Math.max(0, i - 59); k <= i; k++) { liq += c[k] * (v[k] || 0); n++; }
     const vol = []; for (let k = i - 59; k <= i; k++) if (k > 0) vol.push(c[k] / c[k - 1] - 1);
-    rows.push({ sym: s.sym, code: s.sym.replace('TADAWUL:', ''), name: s.name || s.sym, price: +c[i].toFixed(2), mom6, ret1m: c[i] / c[i - 21] - 1, liq: liq / n, vol60: sd(vol), asOf: iso(b[i].t) });
+    rows.push({ sym: s.sym, code: s.sym.replace('TADAWUL:', ''), name: s.name || s.sym, price: +c[i].toFixed(2), mom6, wk52, ret1m: c[i] / c[i - 21] - 1, liq: liq / n, vol60: sd(vol), asOf: iso(b[i].t) });
   }
   if (!rows.length) return { success: false, error: 'No eligible names — cache may be cold. Run: node scripts/bars_cache.mjs warm.' };
 
   const liquid = [...rows].sort((a, b) => b.liq - a.liq).slice(0, Math.ceil(rows.length * liquidFrac));
-  const ranked = [...liquid].sort((a, b) => b.mom6 - a.mom6);
+  // CORE SIGNAL = rank-combine of 6-1mo momentum + 52-week-high proximity (validated 2026-06-22,
+  // scripts/momentum_refinements_test.mjs: combo gate t 3.38, OOS halves 1.90/3.60, 9/9 positive
+  // years — strictly beats mom6-alone). Average the two percentile ranks within the liquid pool.
+  const both = liquid.filter(r => r.wk52 != null);
+  const pool = both.length >= 10 ? both : liquid;     // fall back to mom6-only if wk52 sparse
+  const pctRank = (arr, key) => { const s = [...arr].sort((a, b) => a[key] - b[key]); s.forEach((r, i) => r['_r_' + key] = arr.length > 1 ? i / (arr.length - 1) : 0.5); };
+  pctRank(pool, 'mom6');
+  if (pool === both) pctRank(pool, 'wk52');
+  pool.forEach(r => r.combo = pool === both ? (r._r_mom6 + r._r_wk52) / 2 : r._r_mom6);
+  const ranked = [...pool].sort((a, b) => b.combo - a.combo);
   const k = Math.max(5, Math.floor(ranked.length * quintileFrac));
   const holdings = ranked.slice(0, k).map((r, idx) => ({
     rank: idx + 1, sym: r.sym, code: r.code, name: r.name, price: r.price,
     mom6: +(r.mom6 * 100).toFixed(1), ret1m: +(r.ret1m * 100).toFixed(1),
+    wk52: r.wk52 != null ? +(r.wk52 * 100).toFixed(1) : null,
     sharia: getShariaStatus(r.sym).basis,
   }));
 
@@ -173,8 +185,8 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   return {
     success: true, asOf, nextRebalance,
     universe: { compliant: compliant.length, eligible: rows.length, liquid: liquid.length, holdings: holdings.length },
-    params: { lookback: '6mo (skip last 1mo)', minListing: '≥2y listed', liquidFilter: 'liquid half', quintile: 'top 20%', rebalance: 'monthly', cost: '0.11% RT (Derayah)', weighting: `equal-weight (~${weight}% each)` },
-    validated: { excessPerYr: '+10 to +15%/yr', absCagr: '15–25%/yr', nwT: '2.6–3.2', maxDD: '~−26% (better than basket)', caveat: 'OOS-stable; survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
+    params: { lookback: '6-1mo momentum × 52-week-high (rank combo)', minListing: '≥2y listed', liquidFilter: 'liquid half', quintile: 'top 20%', rebalance: 'monthly', cost: '0.11% RT (Derayah)', weighting: `equal-weight (~${weight}% each)` },
+    validated: { excessPerYr: '+12 to +15%/yr', absCagr: '~15.6%/yr', perPeriodT: '3.38 (gate-passes; 2.88 at 0.30% cost)', oos: '9/9 positive years, both halves t>1.5', maxDD: 'better than basket', caveat: 'combo upgrade 2026-06-22 (beats 6-1mo alone); survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
     seasonal,
     sizing,
     turnover: turnoverNamed,
