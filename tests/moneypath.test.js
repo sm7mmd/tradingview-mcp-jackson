@@ -623,6 +623,28 @@ describe('contract_flow helpers', () => {
     assert.equal(isContractHeadline('Atlas Elevators announces its Annual Financial results for the period ending'), false);
     assert.equal(isContractHeadline("Almuneef Company Announces the Board's Recommendation to Increase Capital"), false);
   });
+  it('classifyCounterparty defaults to private on empty/null/undefined', () => {
+    assert.equal(classifyCounterparty(''), 'private');
+    assert.equal(classifyCounterparty(null), 'private');
+    assert.equal(classifyCounterparty(undefined), 'private');
+  });
+  it('classifyCounterparty is case-insensitive', () => {
+    assert.equal(classifyCounterparty('CONTRACT WITH SAUDI ARAMCO'), 'govt');
+    assert.equal(classifyCounterparty('contract with neom company'), 'govt');
+  });
+  it('space-padded terms (PIF, SAR) match as standalone words, not substrings', () => {
+    // ' pif' / 'sar ' are deliberately space-bounded to avoid false hits inside other words.
+    assert.equal(classifyCounterparty('Co. announces an award from the PIF for a project'), 'govt'); // " pif " → matches " pif"
+    assert.equal(classifyCounterparty('Award from SAR for a rail link'), 'govt');                     // "sar " (Saudi Arabia Railways)
+    assert.equal(classifyCounterparty('Spife Trading Co. wins a private order'), 'private');           // contains "pif" but not " pif"
+    assert.equal(classifyCounterparty('Sars Medical Co. signs a deal'), 'private');                    // contains "sar" but not "sar "
+  });
+  it('isContractHeadline returns false on empty/null and is case-insensitive', () => {
+    assert.equal(isContractHeadline(''), false);
+    assert.equal(isContractHeadline(null), false);
+    assert.equal(isContractHeadline('CO. ANNOUNCES A TENDER WIN'), true);
+    assert.equal(isContractHeadline('Co. announces a PURCHASE ORDER receipt'), true);
+  });
 });
 
 // ── momentum decision helpers (pure) ──────────────────────────────────────────
