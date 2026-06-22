@@ -15,7 +15,7 @@ function switchTab(name,btn){
   // Markets tab
   if(name==='markets'){ loadMarketsPanel(); loadPlaybook(); }
   // Goals tab
-  if(name==='goals'){ loadGoalsPanel(); }
+  if(name==='goals'){ loadGoalsPanel(); loadAllocationPanel(); }
   // Lab tab
   if(name==='lab'){ loadLabPanel(); loadStrategyValidation(); }
   // Momentum Screen tab (+ block-deal signal)

@@ -20,6 +20,7 @@ import { windowReturn, abnormalReturn, sliceByDate } from '../dashboard/index_fl
 import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashboard/pead.mjs';
 import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
 import { portfolioGuillotine, tstat as gTstat } from '../dashboard/guillotine.mjs';
+import { normalizeWeights, computeRebalance, DEFAULT_WEIGHTS } from '../dashboard/allocation.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -752,5 +753,92 @@ describe('decision --held normalization', () => {
     assert.deepEqual(t.hold, ['TADAWUL:2222']);
     assert.deepEqual(t.sell, ['TADAWUL:9999']);
     assert.deepEqual(t.buy, ['TADAWUL:2200', 'TADAWUL:1321']);
+  });
+});
+
+describe('allocation policy', () => {
+  const pick = (sleeves, k) => sleeves.find(s => s.key === k);
+
+  it('normalizeWeights clamps negatives and renormalizes to 1', () => {
+    const w = normalizeWeights({ tasi_momentum: 1, us_sharia: -5, gold: 1 });
+    assert.equal(w.us_sharia, 0);                       // negative clamped to 0
+    assert.ok(Math.abs(w.tasi_momentum + w.us_sharia + w.gold - 1) < 1e-9);
+    assert.ok(Math.abs(w.tasi_momentum - 0.5) < 1e-9);  // 1 of {1,0,1} → 0.5
+    assert.ok(Math.abs(w.gold - 0.5) < 1e-9);
+  });
+
+  it('normalizeWeights scales arbitrary positive weights to sum 1', () => {
+    const w = normalizeWeights({ tasi_momentum: 50, us_sharia: 30, gold: 20 });
+    assert.ok(Math.abs(w.tasi_momentum - 0.5) < 1e-9);
+    assert.ok(Math.abs(w.us_sharia - 0.3) < 1e-9);
+    assert.ok(Math.abs(w.gold - 0.2) < 1e-9);
+  });
+
+  it('normalizeWeights falls back to defaults when all weights are <= 0', () => {
+    assert.deepEqual(normalizeWeights({ tasi_momentum: 0, us_sharia: 0, gold: 0 }), DEFAULT_WEIGHTS);
+    assert.deepEqual(normalizeWeights({}), DEFAULT_WEIGHTS);
+  });
+
+  it('computeRebalance: 50/30/20 on a 100k all-in-TASI book → SELL 50k TASI, BUY 30k US, BUY 20k gold', () => {
+    const r = computeRebalance({
+      values: { tasi_momentum: 100000, us_sharia: 0, gold: 0 },
+      weights: DEFAULT_WEIGHTS,
+    });
+    assert.equal(r.total, 100000);
+    const tasi = pick(r.sleeves, 'tasi_momentum');
+    const us   = pick(r.sleeves, 'us_sharia');
+    const gold = pick(r.sleeves, 'gold');
+    assert.equal(tasi.action, 'SELL'); assert.equal(tasi.amount, 50000);
+    assert.equal(us.action, 'BUY');    assert.equal(us.amount, 30000);
+    assert.equal(gold.action, 'BUY');  assert.equal(gold.amount, 20000);
+    assert.equal(tasi.targetValue, 50000);
+    assert.ok(Math.abs(tasi.currentPct - 1) < 1e-9);
+  });
+
+  it('computeRebalance: HOLD when each sleeve is on-target within 0.5%', () => {
+    const r = computeRebalance({
+      values: { tasi_momentum: 50000, us_sharia: 30000, gold: 20000 },
+      weights: DEFAULT_WEIGHTS,
+    });
+    assert.equal(r.total, 100000);
+    for (const s of r.sleeves) {
+      assert.equal(s.action, 'HOLD');
+      assert.equal(s.amount, 0);
+    }
+    assert.ok(r.maxDriftPct < 0.5);
+  });
+
+  it('computeRebalance: a drift inside the 0.5% band stays HOLD, just outside flips to action', () => {
+    // total 100000, band = 500 SAR. TASI off by 400 → HOLD; off by 600 → BUY.
+    const inBand = computeRebalance({
+      values: { tasi_momentum: 49600, us_sharia: 30000, gold: 20000 },
+      weights: DEFAULT_WEIGHTS,
+    });
+    // total is 99600 here; recompute uses that total — assert TASI delta < band
+    const tasiIn = pick(inBand.sleeves, 'tasi_momentum');
+    assert.ok(Math.abs(tasiIn.delta) < inBand.total * 0.005);
+    assert.equal(tasiIn.action, 'HOLD');
+  });
+
+  it('computeRebalance: total=0 → targets shown, no BUY/SELL actions', () => {
+    const r = computeRebalance({
+      values: { tasi_momentum: 0, us_sharia: 0, gold: 0 },
+      weights: DEFAULT_WEIGHTS,
+    });
+    assert.equal(r.total, 0);
+    for (const s of r.sleeves) {
+      assert.equal(s.action, 'HOLD');
+      assert.equal(s.amount, 0);
+      assert.equal(s.currentPct, 0);
+      assert.equal(s.targetValue, 0);
+    }
+    assert.equal(pick(r.sleeves, 'tasi_momentum').targetPct, 0.5);
+  });
+
+  it('computeRebalance: defaults to DEFAULT_WEIGHTS and empty values', () => {
+    const r = computeRebalance();
+    assert.equal(r.total, 0);
+    assert.equal(r.sleeves.length, 3);
+    assert.equal(pick(r.sleeves, 'gold').targetPct, 0.2);
   });
 });

@@ -450,6 +450,114 @@ async function saveGoalProfile() {
 }
 
 // ════════════════════════════════════════════════════════════
+// MULTI-ASSET ALLOCATION (Goals tab)
+// ════════════════════════════════════════════════════════════
+let allocationData = null;
+
+async function loadAllocationPanel() {
+  const el = document.getElementById('allocation-content');
+  if (!el) return;
+  el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)"><div style="font-size:11px;color:var(--text3)">Loading allocation policy…</div></div>`;
+  try {
+    const d = await fetch('/api/allocation').then(safeJson);
+    if (d.error) throw new Error(d.error);
+    allocationData = d;
+    renderAllocationPanel();
+  } catch(e) {
+    el.innerHTML = `<div class="lab-insight-card"><div style="font-size:11px;color:var(--red)">Could not load allocation: ${e.message}</div></div>`;
+  }
+}
+
+function renderAllocationPanel() {
+  const el = document.getElementById('allocation-content');
+  if (!el || !allocationData) return;
+  const { policy, sleeves, rebalance, validated } = allocationData;
+  const fmt = v => (+v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const fmtPct = v => `${(((+v) || 0) * 100).toFixed(0)}%`;
+  const byKey = Object.fromEntries(rebalance.sleeves.map(s => [s.key, s]));
+
+  const weightRows = sleeves.map(s => {
+    const w = policy.weights?.[s.key] ?? 0;
+    const val = policy.values?.[s.key] ?? 0;
+    return `
+    <div style="display:grid;grid-template-columns:1.4fr 0.8fr 1fr;gap:10px;align-items:center;padding-block:6px;border-block-end:1px solid var(--border)">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text)">${s.label}</div>
+        <div style="font-size:9px;color:var(--text3)">${s.note}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:var(--text3);margin-block-end:2px">Weight %</div>
+        <input class="goal-input goal-input-sm" id="alloc-w-${s.key}" type="number" step="1" min="0" value="${(w*100).toFixed(0)}" style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:9px;color:var(--text3);margin-block-end:2px">Current SAR</div>
+        <input class="goal-input goal-input-sm" id="alloc-v-${s.key}" type="number" step="100" min="0" value="${(+val||0)}" style="width:100%">
+      </div>
+    </div>`;
+  }).join('');
+
+  const actionRows = sleeves.map(s => {
+    const r = byKey[s.key] || {};
+    const col = r.action === 'BUY' ? 'var(--green)' : r.action === 'SELL' ? 'var(--red)' : 'var(--text3)';
+    const actionTxt = r.action === 'HOLD' ? 'HOLD' : `${r.action} ${fmt(r.amount)} SAR`;
+    return `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding-block:5px;border-block-end:1px solid var(--border);font-size:11px">
+      <span style="color:var(--text2)">${s.label}</span>
+      <span style="color:var(--text3);font-size:10px">${fmtPct(r.currentPct)} → ${fmtPct(r.targetPct)}</span>
+      <span style="color:${col};font-weight:600">${actionTxt}</span>
+    </div>`;
+  }).join('');
+
+  const totalTxt = rebalance.total > 0
+    ? `Book value ${fmt(rebalance.total)} SAR · max drift ${rebalance.maxDriftPct.toFixed(1)}%`
+    : 'Enter current SAR values per sleeve to see rebalance actions.';
+
+  el.innerHTML = `
+<div class="lab-insight-card" style="border-color:var(--accent)">
+  <div style="font-size:14px;font-weight:700;color:var(--text);margin-block-end:4px">🧭 Multi-Asset Allocation</div>
+  <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-block-end:12px">
+    A fixed-weight policy across your validated TASI momentum book, US-Sharia equity, and gold.
+    Quarterly rebalancing lifted Sharpe ${validated.sharpe}, cut maxDD ${validated.maxDD},
+    and added ${validated.rebalancePremium} (${validated.window}).
+    <em style="color:var(--text3)">~5y sample, gold's run flatters it; weights are yours to set.</em>
+  </div>
+
+  <div style="margin-block-end:14px">${weightRows}</div>
+
+  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-block-end:6px">Rebalance actions</div>
+  <div style="margin-block-end:6px">${actionRows}</div>
+  <div style="font-size:9px;color:var(--text3);margin-block-end:12px">${totalTxt}</div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <span style="font-size:9px;color:var(--text3)">Cadence: <strong style="color:var(--text2)">${policy.cadence || 'quarterly'}</strong> — rebalance every 3 months back to target.</span>
+    <button class="btn btn-primary" style="font-size:11px;padding:5px 14px" onclick="saveAllocationPolicy()">Save policy</button>
+  </div>
+</div>`;
+}
+
+async function saveAllocationPolicy() {
+  if (!allocationData) return;
+  const sleeves = allocationData.sleeves || [];
+  const weights = {}, values = {};
+  for (const s of sleeves) {
+    const wEl = document.getElementById(`alloc-w-${s.key}`);
+    const vEl = document.getElementById(`alloc-v-${s.key}`);
+    weights[s.key] = (parseFloat(wEl?.value) || 0) / 100;
+    values[s.key]  = parseFloat(vEl?.value) || 0;
+  }
+  try {
+    const d = await fetch('/api/allocation', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weights, values, cadence: allocationData.policy?.cadence || 'quarterly' }),
+    }).then(safeJson);
+    if (d.error) throw new Error(d.error);
+    allocationData = d;
+    renderAllocationPanel();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════════
 // ACCURACY LAB
 // ════════════════════════════════════════════════════════════
 let labData = null;
