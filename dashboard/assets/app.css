@@ -28,6 +28,10 @@
   /* Shadows */
   --shadow-card:0 1px 0 rgba(255,255,255,.04) inset, 0 10px 40px rgba(0,0,0,.55);
   --shadow-elevated:0 1px 0 rgba(255,255,255,.06) inset, 0 24px 64px rgba(0,0,0,.7);
+  /* Type scale */
+  --fs-display:46px; --fs-h1:30px; --fs-h2:24px; --fs-h3:19px;
+  --fs-body:14px; --fs-sm:12.5px; --fs-micro:11px;
+  --eyebrow-ls:.12em;
 }
 html { font-size:14px; scroll-behavior:smooth; }
 body {
@@ -36,9 +40,9 @@ body {
   min-height:100dvh; line-height:1.5;
   /* Radial mesh gradient — subtle luminous orbs */
   background-image:
-    radial-gradient(ellipse 70% 45% at 10% 0%, rgba(61,139,255,.06) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 55% at 50% 105%, rgba(0,230,118,.04) 0%, transparent 60%);
-  background-attachment: fixed;
+    radial-gradient(900px 520px at 85% -8%, rgba(109,94,252,.08), transparent 60%),
+    radial-gradient(700px 480px at 0% 0%, rgba(157,146,255,.05), transparent 55%);
+  background-attachment:fixed;
 }
 /* Grain texture overlay */
 body::before {
