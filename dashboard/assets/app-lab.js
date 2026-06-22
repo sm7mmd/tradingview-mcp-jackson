@@ -224,6 +224,13 @@ function renderGoalsPanel(sugRes) {
     ? +((Math.pow(1 + p.target_return_pct/100, 1/p.horizon_months) - 1) * 100).toFixed(2)
     : 0;
 
+  // Zakat drag — ~2.5%/yr on tradeable-asset value; modeled nowhere else, so the
+  // target is shown net of it for an honest expectation.
+  const zakatPct = p.zakat_pct ?? 2.5;
+  const zakatYrSAR = capitalSAR * zakatPct / 100;
+  const zakatHorizonPct = +(zakatPct * ((p.horizon_months || 12) / 12)).toFixed(1);
+  const netTargetPct = +((p.target_return_pct || 0) - zakatHorizonPct).toFixed(1);
+
   // Goal start date info
   const startDate = p.goal_start_date ? new Date(p.goal_start_date) : null;
   const endDate   = startDate ? new Date(startDate.getTime() + p.horizon_months * 30.44 * 86400000) : null;
@@ -240,6 +247,7 @@ function renderGoalsPanel(sugRes) {
       <div>
         <div style="font-size:16px;font-weight:700;color:var(--text)">${p.goal_name||'My Trading Goal'}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:2px">Target: +${fmtN(p.target_return_pct,1)}% in ${p.horizon_months} months · ${fmtN(capitalSAR)} SAR capital</div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:3px;cursor:help" title="Zakat::Zakat on tradeable assets is ~2.5%/yr of your portfolio value — a real annual obligation that NO return figure includes. The target is shown net of it so the plan is honest, not optimistic. Edit the rate if your zakat base differs.">− Zakat ~${fmtN(zakatPct,1)}%/yr (≈ ${fmtN(zakatYrSAR)} SAR) → <strong style="color:var(--text2)">net ≈ +${fmtN(netTargetPct,1)}%</strong> over ${p.horizon_months}mo</div>
       </div>
       <button class="btn btn-secondary" style="font-size:11px;padding:5px 12px" onclick="toggleGoalEdit()">✏ Edit</button>
     </div>
@@ -260,6 +268,7 @@ function renderGoalsPanel(sugRes) {
         <div class="goal-field"><div class="goal-field-label">Risk per Trade (%)</div><input class="goal-input goal-input-sm" id="gf-risk" type="number" step="0.1" value="${p.risk_per_trade_pct||1.5}"></div>
         <div class="goal-field"><div class="goal-field-label">Max Open Positions</div><input class="goal-input goal-input-sm" id="gf-maxpos" type="number" value="${p.max_open_positions||5}"></div>
         <div class="goal-field"><div class="goal-field-label">Max Drawdown (%)</div><input class="goal-input goal-input-sm" id="gf-dd" type="number" value="${p.max_drawdown_pct||10}"></div>
+        <div class="goal-field"><div class="goal-field-label">Zakat (%/yr)</div><input class="goal-input goal-input-sm" id="gf-zakat" type="number" step="0.1" value="${p.zakat_pct??2.5}"></div>
         <div class="goal-field"><div class="goal-field-label">Start Date</div><input class="goal-input goal-input-sm" id="gf-start" type="date" value="${p.goal_start_date||new Date().toISOString().split('T')[0]}"></div>
       </div>
       <div style="margin-bottom:10px">
@@ -435,6 +444,7 @@ async function saveGoalProfile() {
     risk_per_trade_pct:  parseFloat(getInput('gf-risk')?.value)    || 1.5,
     max_open_positions:  parseInt(getInput('gf-maxpos')?.value)    || 5,
     max_drawdown_pct:    parseFloat(getInput('gf-dd')?.value)      || 10,
+    zakat_pct:           (v => isNaN(v) ? 2.5 : v)(parseFloat(getInput('gf-zakat')?.value)),
     goal_start_date:     getInput('gf-start')?.value || null,
     sharia_required:     document.getElementById('gf-sharia')?.checked || false,
     preferred_markets:   getChips('gf-markets'),

@@ -818,6 +818,7 @@ const DEFAULT_GOAL_PROFILE = {
   target_return_pct: 15,
   horizon_months: 12,
   max_drawdown_pct: 10,
+  zakat_pct: 2.5,
   risk_per_trade_pct: 1.5,
   max_open_positions: 5,
   preferred_markets: ['tasi'],
