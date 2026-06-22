@@ -24,6 +24,7 @@ import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, g
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
 import { getMomentumScreen } from "./momentum_screen.mjs";
+import { getPeadScreen } from "./pead_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
 import { getActiveRiskFlags, getRiskFlags } from "./catalysts.mjs";
@@ -2184,6 +2185,14 @@ const server = createServer(async (req, res) => {
     try {
       return json(res, await getMomentumScreen({ heldSyms: Object.keys(state.positions || {}) }));
     } catch(e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // Conditioned-PEAD satellite: EXPERIMENTAL event-driven open-window screen (Q5 earnings
+  // reaction ∩ momentum-aligned ∩ volume-confirmed). Returns names whose [+2,+22] drift
+  // window is still open. Orthogonal to momentum; size ~10% of risk budget.
+  if (path === '/api/lab/pead' && method === 'GET') {
+    try { return json(res, await getPeadScreen({ heldSyms: Object.keys(state.positions || {}) })); }
+    catch (e) { return json(res, { success: false, error: e.message }, 500); }
   }
 
   // Block-deal signal: validated "follow big premium trades, ~1mo hold" watch-list.
