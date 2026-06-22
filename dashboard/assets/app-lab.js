@@ -896,15 +896,20 @@ async function loadBlockDealSignal() {
 
 // ── Real Fill Ledger: your actual Derayah book — log fills, see HOLD/SELL + live P&L ──
 let fillData = null;
+let trackingData = null;
 
 async function loadFillLedger() {
   const el = document.getElementById('fills-content');
   if (!el) return;
   if (!fillData) el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)"><div style="font-size:11px;color:var(--text3)">Loading fill ledger…</div></div>`;
   try {
-    const d = await fetch('/api/fills').then(safeJson);
+    const [d, t] = await Promise.all([
+      fetch('/api/fills').then(safeJson),
+      fetch('/api/tracking').then(safeJson).catch(() => ({})),
+    ]);
     if (d.error) throw new Error(d.error);
     fillData = d;
+    trackingData = t && !t.error ? t : null;
     renderFillLedger();
   } catch(e) {
     el.innerHTML = `<div class="lab-insight-card"><div style="font-size:11px;color:var(--red)">Could not load fills: ${e.message}</div></div>`;
@@ -917,6 +922,7 @@ function renderFillLedger() {
   const { ledger = [], open = [], summary = {}, prices = {} } = fillData;
   const sar = n => 'SAR ' + Math.round(+n || 0).toLocaleString('en-US');
   const sign = n => ((+n) >= 0 ? '+' : '−') + Math.abs(Math.round(+n || 0)).toLocaleString('en-US');
+  const pct1 = n => ((+n) >= 0 ? '+' : '−') + Math.abs(+n || 0).toFixed(1) + '%';   // slippage keeps a decimal
   const pcol = n => (+n) > 0 ? 'var(--green)' : (+n) < 0 ? 'var(--red)' : 'var(--text3)';
   const code = s => (s || '').replace('TADAWUL:', '');
 
@@ -948,6 +954,43 @@ function renderFillLedger() {
   const unrealTxt = summary.priced
     ? `<span style="color:${pcol(summary.unrealized)};font-weight:700">${sign(summary.unrealized)}</span> <span style="font-size:9px;color:var(--text3)">(${summary.priced} priced${summary.unpriced ? `, ${summary.unpriced} no price` : ''})</span>`
     : `<span style="color:var(--text3)">— scan to price the book</span>`;
+
+  // Plan vs Actual — execution fidelity against the saved decision snapshot
+  const cmp = trackingData?.comparison;
+  const statusBadge = {
+    filled:   `<span style="color:var(--green)" title="Held at or above the planned size.">✓ filled</span>`,
+    partial:  `<span style="color:var(--yellow)" title="Held, but below the planned size.">~ partial</span>`,
+    missed:   `<span style="color:var(--red)" title="In the plan, but you don't hold it.">✗ missed</span>`,
+    off_plan: `<span style="color:var(--text3)" title="You hold this, but it wasn't in the plan.">! off-plan</span>`,
+  };
+  let planBlock = '';
+  if (cmp && cmp.summary) {
+    const s = cmp.summary;
+    const slipTxt = s.avgEntrySlippagePct != null
+      ? `<span style="color:${s.avgEntrySlippagePct <= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${pct1(s.avgEntrySlippagePct)}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    const cmpRows = cmp.rows.map(r => `<tr>
+      <td style="font-size:10px">${statusBadge[r.status] || r.status}</td>
+      <td style="font-size:11px;color:var(--text)">${r.rank != null ? `<span style="color:var(--text3)">#${r.rank}</span> ` : ''}${code(r.sym)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:10px;text-align:end;color:var(--text3)">${r.targetShares ?? '—'} @ ${r.decisionPrice ?? '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:10px;text-align:end;color:var(--text2)">${r.actualShares || 0} @ ${r.avgCost ?? '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:10px;text-align:end;color:${r.slippagePct == null ? 'var(--text3)' : (r.slippagePct <= 0 ? 'var(--green)' : 'var(--red)')}">${r.slippagePct != null ? pct1(r.slippagePct) : '—'}</td>
+    </tr>`).join('');
+    planBlock = `
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-block-end:6px">
+    <span style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">Plan vs Actual <span style="text-transform:none;letter-spacing:0">· plan for ${s.period}</span></span>
+    <button class="btn btn-secondary" style="font-size:10px;padding:3px 10px" onclick="saveDecisionPlan(this)" title="Recompute this month's momentum picks and save them as the plan to measure against.">↻ Re-save plan</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-block-end:10px">
+    <div style="background:var(--bg2);border-radius:8px;padding:7px 9px"><div style="font-size:9px;color:var(--text3)" title="Share of the planned names you actually hold.">Coverage</div><div style="font-size:14px;font-weight:700;color:var(--text)">${s.coveragePct}% <span style="font-size:9px;color:var(--text3)">${s.held}/${s.planCount}</span></div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:7px 9px"><div style="font-size:9px;color:var(--text3)" title="Average gap between your fill price and the decision price. Negative = you filled cheaper.">Entry slippage</div><div style="font-size:14px;font-weight:700">${slipTxt}</div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:7px 9px"><div style="font-size:9px;color:var(--text3)">Missed / off-plan</div><div style="font-size:14px;font-weight:700;color:var(--text2)">${s.missed} / ${s.offPlan}</div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:7px 9px"><div style="font-size:9px;color:var(--text3)" title="Planned capital vs what you actually deployed.">Intended → actual</div><div style="font-size:12px;font-weight:700;color:var(--text2)">${sar(s.intendedBasis)} → ${sar(s.actualBasis)}</div></div>
+  </div>
+  <div class="lab-table-wrap" style="margin-block-end:14px"><table class="lab-table">
+    <thead><tr><th>Status</th><th>Sym</th><th style="text-align:end" title="Planned shares @ decision price.">Planned</th><th style="text-align:end" title="Held shares @ your avg cost.">Actual</th><th style="text-align:end" title="Fill price vs decision price.">Slip</th></tr></thead>
+    <tbody>${cmpRows}</tbody></table></div>`;
+  }
 
   el.innerHTML = `
 <div class="lab-insight-card" style="border-color:var(--accent)">
@@ -985,6 +1028,11 @@ function renderFillLedger() {
     <thead><tr><th>Name</th><th style="text-align:end">Shares</th><th style="text-align:end" title="Weighted-average buy price including fees.">Avg cost</th><th style="text-align:end" title="Latest scan price.">Last</th><th style="text-align:end">Unreal. P&amp;L</th></tr></thead>
     <tbody>${openRows}</tbody></table></div>` : ''}
 
+  ${planBlock || `<div style="display:flex;align-items:center;gap:10px;margin-block-end:14px;padding:8px 10px;background:var(--bg2);border-radius:8px">
+    <span style="font-size:10px;color:var(--text3);flex:1">No saved plan yet. Save this month's momentum picks to track how faithfully you execute them.</span>
+    <button class="btn btn-secondary" style="font-size:10px;padding:4px 12px" onclick="saveDecisionPlan(this)">Save this month's plan</button>
+  </div>`}
+
   ${ledger.length ? `
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-block-end:6px">Fills (${ledger.length})</div>
   <div class="lab-table-wrap"><table class="lab-table">
@@ -1021,6 +1069,23 @@ async function deleteFill(id) {
     if (r.error) throw new Error(r.error);
     await loadFillLedger();
   } catch(e) { alert('Remove failed: ' + e.message); }
+}
+
+// Recompute this month's momentum picks server-side and save them as the plan to
+// measure execution against. Slow (recomputes the screen) — disable the button while it runs.
+async function saveDecisionPlan(btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const r = await fetch('/api/decision/snapshot', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }).then(safeJson);
+    if (r.error) throw new Error(r.error);
+    await loadFillLedger();
+  } catch(e) {
+    alert('Save plan failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 // ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──

@@ -154,6 +154,12 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_fills_sym ON fills(sym, id);
 
+  CREATE TABLE IF NOT EXISTS decision_snapshots (
+    period TEXT PRIMARY KEY,   -- rebalance anchor (YYYY-MM-DD); one plan per period
+    as_of  TEXT,
+    data   TEXT NOT NULL       -- full snapshot JSON
+  );
+
   CREATE TABLE IF NOT EXISTS accuracy_signals (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     sym              TEXT NOT NULL,
@@ -488,6 +494,32 @@ export const realFills = {
     db.prepare('DELETE FROM fills').run();
     db.exec('COMMIT');
     this._syncPositions();   // open book now empty → all fill-sourced positions removed
+  },
+};
+
+// ── Decision snapshots ────────────────────────────────────────────────────────
+// What the strategy SAID to do for a rebalance period — the intent the fill book
+// is later measured against (see tracking.mjs). One plan per period (upsert).
+export const decisionSnapshots = {
+  save(snap) {
+    if (!snap?.period) return { error: 'period required' };
+    db.prepare('INSERT OR REPLACE INTO decision_snapshots (period,as_of,data) VALUES (?,?,?)')
+      .run(snap.period, snap.asOf || null, JSON.stringify(snap));
+    return { ok: true, period: snap.period };
+  },
+  getByPeriod(period) {
+    const r = db.prepare('SELECT data FROM decision_snapshots WHERE period=?').get(period);
+    return r ? JSON.parse(r.data) : null;
+  },
+  getLatest() {
+    const r = db.prepare('SELECT data FROM decision_snapshots ORDER BY period DESC LIMIT 1').get();
+    return r ? JSON.parse(r.data) : null;
+  },
+  getAll() {
+    return db.prepare('SELECT data FROM decision_snapshots ORDER BY period DESC').all().map(r => JSON.parse(r.data));
+  },
+  remove(period) {
+    return { removed: db.prepare('DELETE FROM decision_snapshots WHERE period=?').run(period).changes };
   },
 };
 

@@ -12,8 +12,9 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import CDP from "chrome-remote-interface";
 import { getRules, updateRules } from "../src/rules-engine.js";
-import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, allocationPolicy, accuracyLab, realFills } from "./db.js";
+import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, allocationPolicy, accuracyLab, realFills, decisionSnapshots } from "./db.js";
 import { summarize as summarizeFills } from "./fills.mjs";
+import { compareToSnapshot, buildSnapshot } from "./tracking.mjs";
 import { computeRebalance, SLEEVES, normalizeWeights } from "./allocation.mjs";
 import * as dataCore from "../src/core/data.js";
 import { runBacktest, sweepParams, simulatePortfolio, prepareIndicators, simulateTrades } from "./backtest.mjs";
@@ -25,7 +26,7 @@ import { create as createAlert } from "../src/core/alerts.js";
 import { signJWT, verifyJWT, hashPassword, verifyPassword, users as authUsers, generateId } from "./auth.mjs";
 import { backfillFromTables, gradePending, getValidationStats, HORIZONS as VAL_HORIZONS } from "./validation.mjs";
 import { getCalibration, calibrateSignal } from "./calibration.mjs";
-import { getMomentumScreen } from "./momentum_screen.mjs";
+import { getMomentumScreen, sarPerName } from "./momentum_screen.mjs";
 import { getPeadScreen } from "./pead_screen.mjs";
 import { getBlockDealSignal } from "./blockdeal_signal.mjs";
 import { getStrategyValidation, bustCache as bustStrategyCache } from "./strategy_validation.mjs";
@@ -2280,6 +2281,32 @@ const server = createServer(async (req, res) => {
       const r = realFills.remove(id);
       state.positions = dbPositions.getAll();
       return json(res, { ok: true, ...r });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // ── Plan vs Actual: the saved decision snapshot vs the live fill book ───────
+  if (path === '/api/tracking' && method === 'GET') {
+    try {
+      const snapshot = decisionSnapshots.getLatest();
+      const comparison = snapshot ? compareToSnapshot(snapshot, realFills.book()) : null;
+      return json(res, { snapshot, comparison });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // Capture this month's momentum plan as the tracking snapshot (one per period).
+  // Server-authoritative: recomputes the screen so the saved plan is the real edge.
+  if (path === '/api/decision/snapshot' && method === 'POST') {
+    try {
+      const body = await readBody(req).catch(() => ({}));
+      const account = +(body?.account) || 100000;
+      const heldSyms = Object.keys(state.positions || {});
+      const screen = await getMomentumScreen({ heldSyms });
+      if (!screen.success) return json(res, { error: screen.error || 'Momentum screen unavailable' }, 502);
+      const exposurePct = screen.sizing?.breakdown?.finalExposurePct ?? 0;
+      const sar = sarPerName({ accountSize: account, exposurePct, nHoldings: screen.holdings.length });
+      const snap = buildSnapshot({ screen, account, perNameSAR: sar.perName });
+      const saved = decisionSnapshots.save(snap);
+      return json(res, { saved, snapshot: snap, comparison: compareToSnapshot(snap, realFills.book()) });
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 
