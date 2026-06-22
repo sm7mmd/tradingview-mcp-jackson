@@ -4,7 +4,7 @@ _Last updated: 2026-06-22_
 
 ## TL;DR
 
-One validated edge — **Sharia momentum combo** (deflated t ≈ 2.45, survived the kill-test) — plus a **seasonality drawdown overlay**, a **tiny borderline PEAD satellite**, a **multi-asset allocation policy** (50/30/20 TASI-momentum/US-Sharia/gold, validated Sharpe 0.60→1.05), and **opportunistic Main-market IPO flipping**. All sizing/exposure levers are dead → momentum runs **plain equal-weight, hold the top 6–10 names, monthly**. Honest expectation **mid-teens %/yr** (≈low-teens net of zakat; 20–30% is good-year variance, not a plan). The edge hunt is **exhausted**: ~35+ tests, 1 durable edge; the round-2 batch went 0/3 and the alpha-execution arc went 0 changes / 4 bad changes prevented. **The methodology was upgraded** (judge the SYSTEM walk-forward Calmar vs basket, not each signal's t alone). The money is now in **operating** the edge well + the structural levers (allocation, IPOs), not a fifth factor. The **operate loop is now fully built** — `npm run decision` emits the order list, and a **fill-logger** (CLI `npm run log-fill` + a Lab "Real Fill Ledger" card) records actual Derayah fills back into the book → real HOLD/SELL + a live P&L track record. The only missing input is real trades.
+One validated edge — **Sharia momentum combo** (deflated t ≈ 2.45, survived the kill-test) — plus a **seasonality drawdown overlay**, a **tiny borderline PEAD satellite**, a **multi-asset allocation policy** (50/30/20 TASI-momentum/US-Sharia/gold, validated Sharpe 0.60→1.05), and **opportunistic Main-market IPO flipping**. All sizing/exposure levers are dead → momentum runs **plain equal-weight, hold the top 6–10 names, monthly**. Honest expectation **mid-teens %/yr** (≈low-teens net of zakat; 20–30% is good-year variance, not a plan). The edge hunt is **exhausted**: ~35+ tests, 1 durable edge; the round-2 batch went 0/3 and the alpha-execution arc went 0 changes / 4 bad changes prevented. **The methodology was upgraded** (judge the SYSTEM walk-forward Calmar vs basket, not each signal's t alone). The money is now in **operating** the edge well + the structural levers (allocation, IPOs), not a fifth factor. The **operate loop is now fully built and self-measuring** — `npm run decision` emits the order list (`--save` locks it as the month's plan), a **fill-logger** (CLI `npm run log-fill` + a Lab "Real Fill Ledger" card) records actual Derayah fills → real HOLD/SELL + live P&L, and **plan-vs-actual tracking** scores each month's fills against the saved plan (coverage, entry slippage, missed/off-plan). The only missing input is real trades.
 
 ## Validated edge set
 
@@ -37,7 +37,15 @@ The operate loop is now closed end-to-end. After you place the monthly orders, l
 - **CLI:** `npm run log-fill -- --sym 1120 --buy --shares 100 --price 95.4 [--fees] [--date] [--note]`, `--sell`, `--list [--prices "1120:102,…"]`, `--remove N`, `--json`.
 - **Lab card:** "📒 Real Fill Ledger" on the Momentum tab — P&L summary tiles, log-a-fill form, open-book table with unrealized P&L (priced off the latest scan), removable ledger rows.
 - **Engine:** `dashboard/fills.mjs` (pure `computeBook` — weighted-avg cost, buy fees fold into basis, sell fees reduce proceeds, oversell clamp; `summarize` for unrealized) + `realFills` store (`fills` table) + `GET/POST/DELETE /api/fills`. The store projects the open book into the `positions` blob and **reconciles against the live book** — selling to zero or deleting the last fill removes the position cleanly (a bug where a stale HOLD lingered was caught by an end-to-end test and fixed); manually-entered positions are left untouched.
-- **Not built (deliberate):** live-vs-backtest tracking error (needs the monthly backtest benchmark series persisted — separate arc). Fees are user-entered per fill; confirm they match how you want Derayah commission accounted.
+- **Fees** are user-entered per fill; confirm they match how you want Derayah commission accounted.
+
+## Plan-vs-actual tracking (shipped 2026-06-22)
+
+The loop now **measures its own execution**. `decision --save` (or the card's "Save plan" button) locks the month's momentum picks as a snapshot; logged fills are then scored against it — so you learn whether you traded the edge as designed, not just that you traded.
+- **Capture:** `npm run decision -- --save` → one snapshot per rebalance period (`decision_snapshots` table). UI button → `POST /api/decision/snapshot` (server recomputes the screen authoritatively).
+- **Read:** `npm run log-fill -- --list` prints a **Plan vs Actual** section; the fill card shows coverage / entry-slippage / missed tiles + a per-name table; `GET /api/tracking`.
+- **Metrics** (`dashboard/tracking.mjs`, pure `compareToSnapshot`): per-name status (filled / partial / missed / off-plan), **entry slippage** (avg fill cost vs decision price), **coverage %** (plan names held), and intended → actual capital.
+- **Scope (deliberate):** this is **execution fidelity**, NOT return attribution (book P&L vs a backtested basket) — a separate, later layer. Next nice-to-have: month-over-month coverage/slippage trend (the snapshot history `getAll` is built but unused).
 
 ## Standing research discipline (adopted 2026-06-22)
 
@@ -69,11 +77,12 @@ Full-room brainstorm licensed to challenge the validation regime, then executed 
 
 ## Tests
 
-`test:money` **146** · `test:strategy` **23** · `test:honesty` **2** · `test:drawer` 18 rows clean · `pw-verify` 8 tabs / 0 console errors (LTR + RTL). e2e needs a live TradingView CDP session (not run).
+`test:money` **158** · `test:strategy` **23** · `test:honesty` **2** · `test:drawer` 18 rows clean · `pw-verify` 8 tabs / 0 console errors (LTR + RTL). e2e needs a live TradingView CDP session (not run).
 
 ## Open threads
 
-- **Operate it** — trade the monthly momentum picks on Derayah (`npm run decision`), then log the fills (`npm run log-fill` or the Lab fill card) to build a live track record. The loop is fully built now; the only missing piece is real fills. This is the primary work, not more research.
+- **Operate it** — `npm run decision -- --save` to lock the plan, trade the picks on Derayah, log the fills (`npm run log-fill` or the Lab fill card), then read Plan vs Actual to check your execution. The loop is fully built and self-measuring now; the only missing piece is real fills. This is the primary work, not more research.
+- **Snapshot history view** (small, optional) — `decisionSnapshots.getAll` is built but unused; a month-over-month coverage/slippage trend would show whether execution discipline is improving.
 - **Block-deal re-test** — only remaining untested flow signal with positive shape; data-gated (needs a headed Argaam harvest past ~30 buckets).
 - **Reserve idea (not yet run):** buyback / treasury-purchase under-reaction — harvest the saudiexchange JSON feed to >150 events *before* testing (currently 92 = block-deal-grade thin).
 
