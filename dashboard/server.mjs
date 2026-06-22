@@ -12,7 +12,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import CDP from "chrome-remote-interface";
 import { getRules, updateRules } from "../src/rules-engine.js";
-import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, allocationPolicy, accuracyLab } from "./db.js";
+import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, allocationPolicy, accuracyLab, realFills } from "./db.js";
+import { summarize as summarizeFills } from "./fills.mjs";
 import { computeRebalance, SLEEVES, normalizeWeights } from "./allocation.mjs";
 import * as dataCore from "../src/core/data.js";
 import { runBacktest, sweepParams, simulatePortfolio, prepareIndicators, simulateTrades } from "./backtest.mjs";
@@ -2237,6 +2238,49 @@ const server = createServer(async (req, res) => {
   if (path === '/api/lab/pead' && method === 'GET') {
     try { return json(res, await getPeadScreen({ heldSyms: Object.keys(state.positions || {}) })); }
     catch (e) { return json(res, { success: false, error: e.message }, 500); }
+  }
+
+  // ── Real fill ledger ──────────────────────────────────────────────────────
+  // The actual Derayah book: log buys/sells, project into positions, accrue P&L.
+  // MTM uses the latest scan price for each open name (no extra fetch).
+  if (path === '/api/fills' && method === 'GET') {
+    try {
+      const book = realFills.book();
+      const scanMap = new Map((state.scan.results || []).map(r => [r.sym, r.price]));
+      const priceMap = {};
+      for (const p of book.open) { const px = scanMap.get(p.sym); if (px != null) priceMap[p.sym] = px; }
+      return json(res, {
+        ledger: realFills.getAll(),
+        open: book.open,
+        realized: book.realized,
+        realizedBySym: book.realizedBySym,
+        summary: summarizeFills(book, priceMap),
+        prices: priceMap,
+      });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path === '/api/fills' && method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const r = realFills.log({
+        sym: body?.sym, name: body?.name, action: body?.action,
+        shares: +body?.shares, price: +body?.price, fees: +(body?.fees || 0),
+        date: body?.date, note: body?.note,
+      });
+      if (r.error) return json(res, { error: r.error }, 400);
+      state.positions = dbPositions.getAll();   // keep in-memory book in sync
+      return json(res, r);
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path.startsWith('/api/fills/') && method === 'DELETE') {
+    try {
+      const id = parseInt(path.split('/')[3]);
+      const r = realFills.remove(id);
+      state.positions = dbPositions.getAll();
+      return json(res, { ok: true, ...r });
+    } catch(e) { return json(res, { error: e.message }, 500); }
   }
 
   // Block-deal signal: validated "follow big premium trades, ~1mo hold" watch-list.

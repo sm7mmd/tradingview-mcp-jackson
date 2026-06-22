@@ -22,7 +22,7 @@ import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_
 import { portfolioGuillotine, tstat as gTstat } from '../dashboard/guillotine.mjs';
 import { normalizeWeights, computeRebalance, DEFAULT_WEIGHTS } from '../dashboard/allocation.mjs';
 import { computeBook, summarize } from '../dashboard/fills.mjs';
-import { db } from '../dashboard/db.js';
+import { db, realFills, positions } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
 describe('scoreBias — swing mode (9-pt)', () => {
@@ -961,5 +961,48 @@ describe('summarize — unrealized P&L', () => {
     assert.equal(s.realized, 200);
     assert.equal(s.unrealized, 100);
     assert.equal(s.totalPnl, 300);
+  });
+});
+
+// ── realFills store ↔ positions blob sync (DB round-trip) ───────────────────
+describe('realFills — positions projection stays consistent', () => {
+  const A = 'TADAWUL:9911', B = 'TADAWUL:9912';
+  const clean = () => { realFills.reset(); for (const s of [A, B]) db.prepare('DELETE FROM positions WHERE sym=?').run(s); };
+  before(clean);
+  after(clean);
+
+  it('a buy projects into the positions blob with avg cost', () => {
+    realFills.reset();
+    realFills.log({ sym: '9911', action: 'buy', shares: 100, price: 95.4 });
+    const p = positions.getAll()[A];
+    assert.ok(p, 'position should exist');
+    assert.equal(p.shares, 100);
+    assert.equal(p.buy_price, 95.4);
+    assert.equal(p.source, 'fill');
+  });
+
+  it('removing the only fill removes the orphaned position (empty-ledger reconcile)', () => {
+    realFills.reset();
+    const r = realFills.log({ sym: '9911', action: 'buy', shares: 100, price: 95.4 });
+    realFills.remove(r.id);
+    assert.equal(realFills.getAll().length, 0);
+    assert.equal(positions.getAll()[A], undefined);   // must be gone, not stale
+  });
+
+  it('selling to zero removes the position; realized P&L is booked', () => {
+    realFills.reset();
+    realFills.log({ sym: '9912', action: 'buy',  shares: 50, price: 30 });
+    realFills.log({ sym: '9912', action: 'sell', shares: 50, price: 33 });
+    assert.equal(positions.getAll()[B], undefined);
+    assert.equal(realFills.book().realized, 150);
+  });
+
+  it('does not clobber a manually-entered (non-fill) position', () => {
+    realFills.reset();
+    positions.set(B, { sym: B, name: 'manual', shares: 10, buy_price: 5, source: 'manual' });
+    realFills.log({ sym: '9911', action: 'buy', shares: 5, price: 12 });   // triggers a sync
+    assert.ok(positions.getAll()[B], 'manual position should survive the fill sync');
+    assert.equal(positions.getAll()[B].source, 'manual');
+    db.prepare('DELETE FROM positions WHERE sym=?').run(B);
   });
 });

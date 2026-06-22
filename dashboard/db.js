@@ -462,21 +462,21 @@ export const realFills = {
 
   // Project the open book into the `positions` table so decision.mjs / exit-check
   // see real holdings. Keeps the blob shape they expect: { sym,name,shares,buy_price,avg_cost,date }.
-  // Only touches syms that appear in the ledger — manually-entered positions (from
-  // /api/positions PUT) are left alone. A ledger sym that's been fully sold is deleted.
+  // Reconciles against the CURRENT open book, not the ledger sym list: every fill-sourced
+  // position no longer open (sold to zero, or its fills deleted) is removed — even when the
+  // ledger is now empty. Manually-entered positions (source != 'fill') are left untouched.
   _syncPositions() {
     const { open } = this.book();
-    const ledgerSyms = new Set(this.getAll().map(f => f.sym));
     const openBySym = new Map(open.map(p => [p.sym, p]));
-    for (const sym of ledgerSyms) {
-      const p = openBySym.get(sym);
-      if (p) {
-        positions.set(sym, {
-          sym: p.sym, name: p.name, shares: p.shares,
-          buy_price: p.avgCost, avg_cost: p.avgCost, price: p.avgCost,
-          date: p.lastDate || today(), source: 'fill',
-        });
-      } else {
+    for (const p of open) {
+      positions.set(p.sym, {
+        sym: p.sym, name: p.name, shares: p.shares,
+        buy_price: p.avgCost, avg_cost: p.avgCost, price: p.avgCost,
+        date: p.lastDate || today(), source: 'fill',
+      });
+    }
+    for (const [sym, blob] of Object.entries(positions.getAll())) {
+      if (blob && blob.source === 'fill' && !openBySym.has(sym)) {
         db.prepare('DELETE FROM positions WHERE sym=?').run(sym);
       }
     }
@@ -484,11 +484,10 @@ export const realFills = {
 
   // Wipe the ledger (and the positions it derived). Used by tests / a hard reset.
   reset() {
-    const ledgerSyms = [...new Set(this.getAll().map(f => f.sym))];
     db.exec('BEGIN');
     db.prepare('DELETE FROM fills').run();
     db.exec('COMMIT');
-    for (const sym of ledgerSyms) db.prepare('DELETE FROM positions WHERE sym=?').run(sym);
+    this._syncPositions();   // open book now empty → all fill-sourced positions removed
   },
 };
 
