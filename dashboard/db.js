@@ -21,6 +21,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_WEIGHTS } from './allocation.mjs';
+import { computeBook } from './fills.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH   = join(__dirname, 'mawjah.db');
@@ -139,6 +140,19 @@ db.exec(`
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS fills (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    sym    TEXT NOT NULL,
+    name   TEXT,
+    action TEXT NOT NULL,   -- 'buy' | 'sell'
+    shares REAL NOT NULL,
+    price  REAL NOT NULL,
+    fees   REAL DEFAULT 0,
+    date   TEXT NOT NULL,   -- YYYY-MM-DD
+    note   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_fills_sym ON fills(sym, id);
 
   CREATE TABLE IF NOT EXISTS accuracy_signals (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -402,6 +416,79 @@ export const positions = {
     const ins = db.prepare('INSERT INTO positions (sym,data) VALUES (?,?)');
     for (const [sym, data] of Object.entries(obj || {})) ins.run(sym, JSON.stringify(data));
     db.exec('COMMIT');
+  },
+};
+
+// ── Real fill ledger ──────────────────────────────────────────────────────────
+// Append-only log of ACTUAL Derayah fills. The ledger is the source of truth;
+// the derived open book is projected back into the `positions` blob above so
+// decision.mjs HOLD/SELL and the exit-check P&L keep reading one set of holdings.
+const normFillSym = (s) => /^\d{4}$/.test((s || '').trim()) ? `TADAWUL:${(s || '').trim()}` : (s || '').trim();
+const today = () => new Date().toISOString().split('T')[0];
+
+export const realFills = {
+  // List the raw ledger, oldest → newest (chronological folds correctly).
+  getAll() {
+    return db.prepare('SELECT * FROM fills ORDER BY id ASC').all();
+  },
+
+  // Append one fill and re-project the open book into the positions blob.
+  // Returns { id, fill, book } — book is the recomputed open book + realized P&L.
+  log({ sym, name, action, shares, price, fees = 0, date, note }) {
+    const s = normFillSym(sym);
+    if (!s) return { error: 'sym required' };
+    if (action !== 'buy' && action !== 'sell') return { error: "action must be 'buy' or 'sell'" };
+    if (!(+shares > 0)) return { error: 'shares must be > 0' };
+    if (!(+price > 0)) return { error: 'price must be > 0' };
+    const d = date || today();
+    const result = db.prepare(
+      'INSERT INTO fills (sym,name,action,shares,price,fees,date,note) VALUES (?,?,?,?,?,?,?,?)'
+    ).run(s, name || s, action, +shares, +price, +fees || 0, d, note || null);
+    this._syncPositions();
+    return { id: result.lastInsertRowid, fill: { sym: s, name: name || s, action, shares: +shares, price: +price, fees: +fees || 0, date: d, note: note || null }, book: this.book() };
+  },
+
+  // Delete one fill by id (correction path) and re-project.
+  remove(id) {
+    const r = db.prepare('DELETE FROM fills WHERE id=?').run(id);
+    this._syncPositions();
+    return { removed: r.changes };
+  },
+
+  // Current open book + realized P&L, folded from the full ledger.
+  book() {
+    return computeBook(this.getAll());
+  },
+
+  // Project the open book into the `positions` table so decision.mjs / exit-check
+  // see real holdings. Keeps the blob shape they expect: { sym,name,shares,buy_price,avg_cost,date }.
+  // Only touches syms that appear in the ledger — manually-entered positions (from
+  // /api/positions PUT) are left alone. A ledger sym that's been fully sold is deleted.
+  _syncPositions() {
+    const { open } = this.book();
+    const ledgerSyms = new Set(this.getAll().map(f => f.sym));
+    const openBySym = new Map(open.map(p => [p.sym, p]));
+    for (const sym of ledgerSyms) {
+      const p = openBySym.get(sym);
+      if (p) {
+        positions.set(sym, {
+          sym: p.sym, name: p.name, shares: p.shares,
+          buy_price: p.avgCost, avg_cost: p.avgCost, price: p.avgCost,
+          date: p.lastDate || today(), source: 'fill',
+        });
+      } else {
+        db.prepare('DELETE FROM positions WHERE sym=?').run(sym);
+      }
+    }
+  },
+
+  // Wipe the ledger (and the positions it derived). Used by tests / a hard reset.
+  reset() {
+    const ledgerSyms = [...new Set(this.getAll().map(f => f.sym))];
+    db.exec('BEGIN');
+    db.prepare('DELETE FROM fills').run();
+    db.exec('COMMIT');
+    for (const sym of ledgerSyms) db.prepare('DELETE FROM positions WHERE sym=?').run(sym);
   },
 };
 
