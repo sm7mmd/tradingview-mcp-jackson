@@ -346,13 +346,13 @@ ${!goalsSuggested.length ? `<div class="suggested-empty"><div style="font-size:3
   return slotsHtml + tiers.map(t => {
     const cards = goalsSuggested.filter(r => (r.tier||'enter') === t.key);
     if (!cards.length) return '';
-    return `<div class="suggested-tier-header"><span>${t.label}</span><span style="font-weight:400;font-size:9px;text-transform:none;letter-spacing:0">${t.sub}</span></div><div class="suggested-grid">${cards.map(r => buildSuggestedCard(r)).join('')}</div>`;
+    return `<div class="suggested-tier-header"><span>${t.label}</span><span style="font-weight:400;font-size:9px;text-transform:none;letter-spacing:0">${t.sub}</span></div><div class="suggested-grid">${cards.map((r, idx) => buildSuggestedCard(r, t.key === 'enter' && idx === 0)).join('')}</div>`;
   }).join('');
 })()}
 `;
 }
 
-function buildSuggestedCard(r) {
+function buildSuggestedCard(r, isFeature = false) {
   const fmt = v => v != null ? (+v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const styleColors = {Momentum:'#5ba3ff',Trend:'#00e676',Breakout:'#ffd740',Recovery:'#3d8bff',Pullback:'#6b7394'};
   const primaryCol = styleColors[r.primaryStyle] || 'var(--accent)';
@@ -370,7 +370,7 @@ function buildSuggestedCard(r) {
     : tier === 'scale_in'
     ? `<div class="tier-size-note" style="color:#00e5ff">Already held · signal remains strong — consider adding the second half of your planned position</div>`
     : '';
-  return `<div class="suggested-card" data-tier="${tier}" onclick="openDrawer(scanData.find(x=>x.sym==='${r.sym}')||{sym:'${r.sym}',name:'${(r.name||'').replace(/'/g,'')}'})">
+  return `<div class="suggested-card${isFeature ? ' feature-card' : ''}" data-tier="${tier}" onclick="openDrawer(scanData.find(x=>x.sym==='${r.sym}')||{sym:'${r.sym}',name:'${(r.name||'').replace(/'/g,'')}'})">
   ${tierBadge}
   <div class="suggested-card-header">
     <div style="flex:1">
