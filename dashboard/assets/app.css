@@ -2959,3 +2959,20 @@ input:focus,select:focus,textarea:focus{ outline:none; border-color:var(--accent
   box-shadow:0 0 0 3px var(--accent-dim); }
 /* preserve component-specific layout overridden by the group above */
 .gate-input{ padding:0 42px 0 14px; font-family:"JetBrains Mono",monospace; font-size:12px; border-radius:8px; }
+
+/* ════════════════════════════════════════════════════════════
+   TASK 10 — Momentum tab hero (bespoke editorial header + cards)
+   ════════════════════════════════════════════════════════════ */
+.mom-hero{ padding:28px 0 8px; }
+.mom-hero .eyebrow{ font-size:12px; font-weight:600; letter-spacing:var(--eyebrow-ls); text-transform:uppercase; color:var(--accent2); }
+.mom-hero h2{ font-size:var(--fs-h1); font-weight:800; letter-spacing:-.02em; margin-top:10px; }
+.mom-hero p{ color:var(--text2); font-size:15px; margin-top:10px; max-width:560px; line-height:1.6; }
+.feature-card{ border:1px solid var(--border); border-radius:var(--radius-xl); padding:28px;
+  background:radial-gradient(120% 130% at 100% 0%, rgba(109,94,252,.12), transparent 52%), var(--card); }
+.feature-card h3{ font-size:28px; font-weight:800; letter-spacing:-.02em; }
+/* .suggested-card reconciled here so this definition wins for both Momentum + Goals.
+   Earlier blocks: base @ line ~2546, and a !important hover override @ line ~2691.
+   This block is later in the cascade; hover border-color uses !important to beat that override. */
+.suggested-card{ border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card);
+  padding:20px; transition:border-color .16s var(--ease-out),transform .16s var(--ease-out); }
+.suggested-card:hover{ border-color:var(--border2) !important; transform:translateY(-2px); }

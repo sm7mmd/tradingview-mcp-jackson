@@ -658,7 +658,12 @@ async function loadMomentumScreen() {
         </div>
         <span style="font-size:10px;color:var(--text2);line-height:1.45">${sz.note}</span>
       </div>` : '';
-    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)">
+    const hero = `<div class="mom-hero">
+      <div class="eyebrow">The one validated edge</div>
+      <h2>This month's momentum buy-list</h2>
+      <p>${d.universe?.liquid ?? ''} liquid Sharia names screened · top quintile · ranked by the 6-month-momentum × 52-week-high combo${d.nextRebalance ? ` · next rebalance ${d.nextRebalance}` : ''}.</p>
+    </div>`;
+    el.innerHTML = hero + `<div class="lab-insight-card" style="border-color:var(--accent)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:800;color:var(--text);cursor:help" title="Momentum Screen::A monthly shopping list of stocks to buy. It picks the Saudi shares that have climbed the most over the past 6 months — the idea (called momentum) is that recent winners tend to keep winning for a while. You refresh the list once a month.">Momentum Screen</span>
         <span style="font-size:10px;color:var(--text3);cursor:help" title="How the list is filtered::Start with Sharia-compliant stocks only → keep the easier-to-trade half (liquid) → keep only companies listed at least 2 years (skip fresh IPOs, whose prices are too jumpy) → then take the top 20% by 6-month gain.">monthly buy-list · Sharia-compliant · liquid · ≥2y listed · top-quintile 6mo momentum</span>
