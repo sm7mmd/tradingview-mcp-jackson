@@ -346,13 +346,13 @@ ${!goalsSuggested.length ? `<div class="suggested-empty"><div style="font-size:3
   return slotsHtml + tiers.map(t => {
     const cards = goalsSuggested.filter(r => (r.tier||'enter') === t.key);
     if (!cards.length) return '';
-    return `<div class="suggested-tier-header"><span>${t.label}</span><span style="font-weight:400;font-size:9px;text-transform:none;letter-spacing:0">${t.sub}</span></div><div class="suggested-grid">${cards.map(r => buildSuggestedCard(r)).join('')}</div>`;
+    return `<div class="suggested-tier-header"><span>${t.label}</span><span style="font-weight:400;font-size:9px;text-transform:none;letter-spacing:0">${t.sub}</span></div><div class="suggested-grid">${cards.map((r, idx) => buildSuggestedCard(r, t.key === 'enter' && idx === 0)).join('')}</div>`;
   }).join('');
 })()}
 `;
 }
 
-function buildSuggestedCard(r) {
+function buildSuggestedCard(r, isFeature = false) {
   const fmt = v => v != null ? (+v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const styleColors = {Momentum:'#5ba3ff',Trend:'#00e676',Breakout:'#ffd740',Recovery:'#3d8bff',Pullback:'#6b7394'};
   const primaryCol = styleColors[r.primaryStyle] || 'var(--accent)';
@@ -370,7 +370,7 @@ function buildSuggestedCard(r) {
     : tier === 'scale_in'
     ? `<div class="tier-size-note" style="color:#00e5ff">Already held · signal remains strong — consider adding the second half of your planned position</div>`
     : '';
-  return `<div class="suggested-card" data-tier="${tier}" onclick="openDrawer(scanData.find(x=>x.sym==='${r.sym}')||{sym:'${r.sym}',name:'${(r.name||'').replace(/'/g,'')}'})">
+  return `<div class="suggested-card${isFeature ? ' feature-card' : ''}" data-tier="${tier}" onclick="openDrawer(scanData.find(x=>x.sym==='${r.sym}')||{sym:'${r.sym}',name:'${(r.name||'').replace(/'/g,'')}'})">
   ${tierBadge}
   <div class="suggested-card-header">
     <div style="flex:1">
@@ -658,7 +658,12 @@ async function loadMomentumScreen() {
         </div>
         <span style="font-size:10px;color:var(--text2);line-height:1.45">${sz.note}</span>
       </div>` : '';
-    el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)">
+    const hero = `<div class="mom-hero">
+      <div class="eyebrow">The one validated edge</div>
+      <h2>This month's momentum buy-list</h2>
+      <p>${d.universe?.liquid ?? ''} liquid Sharia names screened · top quintile · ranked by the 6-month-momentum × 52-week-high combo${d.nextRebalance ? ` · next rebalance ${d.nextRebalance}` : ''}.</p>
+    </div>`;
+    el.innerHTML = hero + `<div class="lab-insight-card" style="border-color:var(--accent)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:800;color:var(--text);cursor:help" title="Momentum Screen::A monthly shopping list of stocks to buy. It picks the Saudi shares that have climbed the most over the past 6 months — the idea (called momentum) is that recent winners tend to keep winning for a while. You refresh the list once a month.">Momentum Screen</span>
         <span style="font-size:10px;color:var(--text3);cursor:help" title="How the list is filtered::Start with Sharia-compliant stocks only → keep the easier-to-trade half (liquid) → keep only companies listed at least 2 years (skip fresh IPOs, whose prices are too jumpy) → then take the top 20% by 6-month gain.">monthly buy-list · Sharia-compliant · liquid · ≥2y listed · top-quintile 6mo momentum</span>
