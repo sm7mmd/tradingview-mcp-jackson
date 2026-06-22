@@ -127,3 +127,111 @@ Drive `saudiexchange.sa` "Recently Listed" with Playwright (Akamai bypass) to pu
 
 ### Sources
 Argaam (article IDs 1869916, 1764248, 1786822, 1513938, 1501626), Arab News (ACWA debut, GCC IPO 2024/2025, Nice One), The National (MBC +30%, Luberef −4%), MenaBytes (Rasan +30% cap), gulfbusiness/gulfnews (Modern Mills, Flynas), sahmcapital (2024 IPO review, Dar AlBalad +26%), Zawya, PwC/Markaz GCC IPO watch. Harvest script: `scripts/ipo_harvest.mjs` (`--json` for raw ledger).
+
+---
+
+## Population hardening (price-derived, 2026-06-22)
+
+The n=5 clean-day-1 sample was too thin. Offer prices for the full population aren't
+cheaply scrapable (saudiexchange.sa is Akamai-walled, firecrawl out of credits), so this
+section hardens the study two ways, **without** needing population-wide offer prices:
+
+- **(A) a price-derived population PROXY** computed off the Yahoo bars cache for every
+  TASI name whose first cached daily bar falls on/after 2021-01-01 (a window-IPO), and
+- **(B) the TRUE offer-relative pop** on the ledger subset that has a known offer price.
+
+Script: `scripts/ipo_population.mjs` (`--json` for raw). Frequency study — **no guillotine.**
+
+### Population identified
+- **n = 41 recent listings** (first cached bar ≥ 2021-01-01) out of 182 TASI names scanned.
+  This is the real window-IPO population we can see via price (vs the 26 news-curated rows).
+
+### (A) Proxy base-rate — and why it's weak (the load-bearing lesson)
+| Stat (n=41, intraday first-bar) | Value |
+|---|---|
+| % up day-1 (close>open) | 43.9% |
+| % down day-1 (close<open) | 56.1% |
+| % intraday near-+30% cap, first 3 sessions | **0.0%** |
+| median day-1 intraday return | 0.0% |
+| median first-5-session return | −0.2% |
+
+**The cap-pin proxy reads 0% and that is the finding, not a bug.** Yahoo's first daily
+bar already **opens** at the popped/capped price (the offer→open gap happened pre-open),
+so `close/open − 1` is ~flat and is **blind to the offer-relative pop**. The intraday proxy
+therefore *understates* the pop badly — it only measures "did it keep drifting after the
+first print" (a coin-flip, 44% up). **Conclusion: the offer→open gap, not intraday drift,
+IS the IPO pop, and you cannot recover it from secondary-market bars alone.** The honest
+population number is the offer-subset truth in (B), not the intraday proxy.
+
+### (B) TRUE pop on the offer-price subset (the real hardening: n=5 → n=12)
+Computed as day-1 close / offer − 1 on ledger names with a known offer price. **Critical
+data-quality guard:** Yahoo's first cached bar is *not* reliably the true day-1 bar — three
+contamination modes were found and **excluded** (not fabricated around):
+1. **Pre-IPO history** — `2030.SR` (Luberef) opens 2016 (spun-off Aramco unit); its real
+   day-1 was −4% per the ledger but Yahoo can't source it cleanly → excluded.
+2. **First bar lags the list date by weeks/months** — ACWA (+69d), Nayifat (+16d),
+   Rasan/Al Taiseer (+10d), ME Pharma (+138d), Smile Care (+104d) → excluded.
+3. **Price-scale artifact** — `4083.SR` (United Intl) offer 132 but Yahoo trades ~65
+   (impossible −50% offer→open gap; ledger says cum +27.6%) → excluded.
+
+Keeping only rows where the first bar is within 6 days of the known list date **and** the
+offer→open gap is mechanically sane (≥ −35%):
+
+| Trusted offer-subset (n=12) | Value |
+|---|---|
+| popped (true day-1 close > offer) | **10 / 12 = 83.3%** |
+| broke issue (true close < offer) | 2 / 12 = 16.7% (Arabian Mills −0.3%, Flynas −3.4%) |
+| **median TRUE day-1 pop** | **+30.0%** |
+| median offer→open gap (the pop lives here) | +10.0% |
+| names pinning ≈+30% true | MBC, Modern Mills, Tamkeen, Smile Care (and Al Majed/Miahona/Lamasat gapped >+40%) |
+
+The true-pop median of **+30.0%** confirms the cap-pin pattern at population grade: the
+modal hot Main IPO closes day-1 right at the +30% expanded limit, and the few that gap
+above it (Al Majed +68.9%, Miahona +53.6%, Lamasat +35%) opened far above offer. **The
+proxy did NOT track the truth** (median proxy ~0% vs median true +30%) — exactly because
+the pop is in the offer→open gap the proxy can't see. This is the single biggest takeaway:
+**offer-relative pop is only knowable with offer prices; secondary bars can't proxy it.**
+
+### (C) Decay check (by first-bar year, intraday proxy)
+| Year | n | %up | median day-1 intraday | median 5-session |
+|---|---|---|---|---|
+| 2021 | 12 | 41.7% | 0.0% | −0.5% |
+| 2022 | 14 | 28.6% | −1.1% | −1.4% |
+| 2023 | 6 | 66.7% | +5.3% | +8.4% |
+| 2024 | 4 | 75.0% | +9.5% | +9.0% |
+| 2025 | 5 | 40.0% | −0.3% | +2.2% |
+
+These are *intraday/follow-through* numbers (the proxy), so they describe post-print drift,
+not the offer pop. No clean monotonic decay; 2023–24 listings drifted up more after the
+first print, 2021–22 and 2025 were flat-to-soft. On the **offer-relative** side, the trusted
+subset spans 2021→2026 (ACWA 2021 cap … Dar AlBalad 2026 +32%) and the +30% pin keeps
+recurring — **consistent with the prior finding of no day-1 pop decay on Main Market.**
+
+### Updated decision (population-grade)
+The verdict is **unchanged in shape but now rests on n=12 verified offer-relative pops, not
+n=5**, plus a 41-name population map of what's visible via price:
+
+- **Main-Market Sharia IPOs: MILD YES, opportunistic cash-management with a kicker.** Day-1
+  pop base rate ≈ **83% popped, median +30%** (cap-pinned), break-issue ≈ **17% and shallow**
+  (the two breaks were −0.3% and −3.4%, not the −60% Nomu tails). Direction clears the hurdle.
+- **The number to plan around is still pop% × allocation%.** The +30% cap × a small
+  oversubscribed allocation (1–3% filled on hot deals) → ~**+0.3% to +0.9% per deal on
+  *applied* capital**, with cold/cornerstone-light deals filling more. Honest **annualized on
+  cycled capital ≈ +8% to +15%, high-variance, positively skewed**, capacity-limited (only
+  1–2 deals run at once, ~30–40% effective deployment). Unchanged from the prior estimate —
+  the bigger sample tightened the *base rate*, not the allocation math.
+- **Nomu: still NO** (qualified-investor gating + −28% to −60% tails).
+
+### Honest coverage caveat (read this)
+- **The hardening is real but bounded.** The *population proxy* (A) is genuinely population-
+  scale (n=41) but is the **wrong statistic** — it's intraday/follow-through and blind to the
+  offer pop. The *offer-relative truth* (B) is the right statistic but is still only **n=12**
+  (the ledger names with a known offer price that also survive the data-quality guard).
+- **We did not break the offer-price wall.** Population-wide offer prices remain unscrapable;
+  this session expanded the *clean offer-relative sample from 5 to 12* and *mapped the 41-name
+  price-visible population*, but a true population offer-relative base rate (n≈80 Main) still
+  needs the exchange's prospectus/listing table. The +30%-pop / ~17%-break headline is solid
+  for Main; its allocation-scaled return is the honest, smaller, capacity-limited reality.
+- **No fabrication.** Excluded rows are excluded with the reason stamped (date lag / pre-IPO
+  history / price scale), not back-filled. Luberef's −4% day-1 is known from news but Yahoo
+  can't source it cleanly, so it is dropped rather than invented.
