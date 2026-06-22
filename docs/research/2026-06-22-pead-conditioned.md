@@ -86,3 +86,50 @@ This is a **borderline** pass, not a momentum-grade edge (momentum gate t 3.38):
 momentum. Re-run the gate periodically; if the per-period t falls below 2 on the live cost on a
 future refresh, retire it. The core engine remains the momentum combo (the ONE validated edge).
 PEAD survives, but on a thin margin.
+
+## Correlation to momentum
+
+A 2nd sleeve only earns its risk budget if its return stream is **low-correlation** to momentum —
+otherwise it is just more momentum and adds no diversification. `scripts/pead_momentum_correlation.mjs`
+rebuilds both per-period net-excess series with the same machinery the gates used and aligns them by
+calendar month:
+
+- **Series A — conditioned-PEAD monthly net-excess**: the exact `excessSeries` the guillotine consumed
+  in `scripts/pead_conditioned_test.mjs` (one obs per calendar month, equal-weight conditioned events'
+  net [+2,+22] drift vs equal-weight ^TASI). 118 events across **39 months** (2021-07 … 2026-05),
+  mean +2.25% / month — matches the gate exactly.
+- **Series B — momentum combo quintile monthly net-excess**: the full top-quintile baseline from
+  `scripts/breadth_test.mjs` (== the live grade), per 20-session rebalance, mapped to the rebalance
+  **start month** and averaged within-month. 64 months, mean +1.27% / month over the overlap.
+
+### Result
+
+| Metric | Value |
+|---|---|
+| Overlapping months | **39** (all PEAD months fall inside the momentum span 2021-07 … 2026-05) |
+| Pearson r | **−0.003** |
+| PEAD overlap mean excess (sd) | +2.25% (6.55%) |
+| Momentum overlap mean excess (sd) | +1.27% (2.90%) |
+
+**Interpretation:** GENUINELY DIVERSIFYING. |r| ≈ 0.00 is far below the 0.3 diversification
+threshold — the conditioned-PEAD excess stream is effectively orthogonal to the momentum combo's. It
+is **not** momentum in disguise; it is a distinct return source (an event-reaction drift, not a
+cross-sectional trend rank), and n = 39 overlapping months is enough to trust the estimate (not
+underpowered).
+
+**Sizing recommendation:** a small, monitored 2nd sleeve of **≈10–20% of the risk budget** is
+justified on the diversification grounds. This *reinforces* the borderline-gate caveats above rather
+than overriding them: the edge passes the gate only on a thin cost margin (t 2.14, flips to FAIL at
+0.30% RT) and is front-loaded in time, so keep the allocation at the **low end (~10%)**, monitored,
+and retire it if a future gate refresh drops the per-period t below 2. Low correlation makes it a
+*legitimate* second sleeve; it does not make it a strong one.
+
+### Alignment caveat (honest)
+
+The two series do not share an identical holding window. PEAD is event-driven — a month exists only
+when a conditioned earnings event occurred, and its "return" is a [+2,+22]-session drift starting
+mid-month. Momentum is a fixed 20-session rebalance whose window starts on the rebalance date. Both
+are *abnormal-vs-equal-weight-basket monthly excess streams* — the correct object to correlate for
+diversification — but the alignment is approximate-by-calendar-month, not trade-for-trade. With r
+this close to zero the conclusion (uncorrelated) is robust to that approximation; a small nonzero
+correlation would have warranted more caution.
