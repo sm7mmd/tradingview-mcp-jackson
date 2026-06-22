@@ -245,7 +245,7 @@ tr.selected-row { background:var(--blue-dim) !important; }
 .score-bar  { flex:1; height:4px; background:rgba(255,255,255,.06); border-radius:4px; overflow:hidden; min-width:50px; }
 .score-fill { height:100%; border-radius:4px; transition:width .6s var(--ease-spring); }
 .score-text { font-size:11px; color:var(--text2); font-family:"JetBrains Mono",monospace; white-space:nowrap; }
-.bias-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; white-space:nowrap; letter-spacing:.02em; }
+.bias-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:999px; font-size:10.5px; font-weight:700; white-space:nowrap; letter-spacing:.02em; }
 /* Temperature scale — describes trend STATE, not buy/sell. Teal=uptrend, amber=downtrend, grey=flat. */
 .bias-strong-buy  { background:rgba(45,212,191,.16);     color:#2dd4bf;       }
 .bias-buy         { background:rgba(45,212,191,.09);     color:#5eead4;       }
@@ -366,7 +366,7 @@ tr.selected-row { background:var(--blue-dim) !important; }
 tr.flash-improve{animation:flash-green .9s ease;}
 tr.flash-degrade{animation:flash-red .9s ease;}
 /* ── Calendar badge ── */
-.cal-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;background:rgba(61,139,255,.12);color:var(--accent);margin-inline-start:4px;cursor:default;}
+.cal-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:6px;font-size:9px;font-weight:700;background:rgba(61,139,255,.12);color:var(--accent);margin-inline-start:4px;cursor:default;}
 .cal-badge.urgent{background:rgba(255,145,0,.15);color:var(--orange);}
 /* ── Trade journal ── */
 .journal-section{padding:6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-top:8px;}
@@ -389,7 +389,7 @@ tr.flash-degrade{animation:flash-red .9s ease;}
 .wb-none{background:rgba(255,23,68,.12);color:#ff5252;}
 .wb-na{background:var(--border2);color:var(--text3);}
 /* ── Position badge ── */
-.pos-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-inline-start:5px;}
+.pos-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;margin-inline-start:5px;}
 .pos-gain{background:rgba(0,200,83,.12);color:var(--green);}
 .pos-loss{background:rgba(255,23,68,.12);color:#ff5252;}
 /* ── Screenshot inline ── */
@@ -490,8 +490,8 @@ tr.flash-degrade{animation:flash-red .9s ease;}
 
 
 /* ── Scoring overview ── */
-.scoring-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:14px; overflow:hidden; }
-.scoring-card-header { padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg2); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; }
+.scoring-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-card); margin-bottom:14px; overflow:hidden; }
+.scoring-card-header { padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg2); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; }
 .scoring-card-header h3 { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--text2); }
 .scoring-rules { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; padding:14px 16px; }
 .scoring-rule { background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:10px 12px; }
@@ -1068,7 +1068,7 @@ td[title]{cursor:help;}
 .heatmap-section{margin-bottom:14px;}
 
 /* ── Dividend tracker ── */
-.div-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;background:rgba(61,139,255,.12);color:var(--accent);margin-inline-start:4px;}
+.div-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:6px;font-size:9px;font-weight:700;background:rgba(61,139,255,.12);color:var(--accent);margin-inline-start:4px;}
 
 /* ── Opportunities shortlist ── */
 .opp-grid{display:flex;flex-direction:column;gap:10px;}
@@ -1686,8 +1686,8 @@ tr.selected-row { background: rgba(61,139,255,.09) !important; }
 }
 
 .scoring-card-header {
-  padding: 14px 20px;
-  background: rgba(7,10,17,.7);
+  padding: 14px 18px;
+  background: var(--bg2);
   border-color: var(--border);
 }
 
@@ -2918,15 +2918,16 @@ tbody td {
 
 /* ── Scoring / panel cards ── */
 .scoring-card {
-  border-radius: 16px !important;
-  border: 1px solid rgba(255,255,255,.06) !important;
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border) !important;
   background: var(--card) !important;
+  box-shadow: var(--shadow-card) !important;
   overflow: hidden;
 }
 .scoring-card-header {
-  padding: 14px 20px !important;
-  background: rgba(6,8,14,.8) !important;
-  border-bottom: 1px solid rgba(255,255,255,.05) !important;
+  padding: 14px 18px !important;
+  background: var(--bg2) !important;
+  border-bottom: 1px solid var(--border) !important;
 }
 .scoring-card-header h3 {
   font-size: 12px !important;
