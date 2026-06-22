@@ -41,9 +41,18 @@ function abnAligned(nC, benchC, iN, jN, iB, jB) {
   return rn - rb;
 }
 
-export async function getPeadScreen({ heldSyms = [] } = {}) {
+// ── Result cache. The screen warms the whole compliant universe (~10s); its output only
+// changes day-to-day (new bars/earnings/combo ranks). Cache per calendar day with a 6h TTL;
+// only successful results are cached so a cold-cache miss can retry. `force:true` bypasses.
+let _cache = null;   // { at:ms, asOf, data }
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function getPeadScreen({ heldSyms = [], force = false } = {}) {
   const today = new Date();
   const asOf = today.toISOString().slice(0, 10);
+  if (!force && _cache && _cache.asOf === asOf && Date.now() - _cache.at < CACHE_TTL_MS) {
+    return _cache.data;
+  }
   // matured cutoff: events strictly older than this have a fully-closed drift window → used only
   // to estimate the historical Q5 reaction breakpoint.
   const maturedCutoff = new Date(Date.now() - (DRIFT_DAYS + 15) * 864e5).toISOString().slice(0, 10);
@@ -173,7 +182,7 @@ export async function getPeadScreen({ heldSyms = [] } = {}) {
   // newest entry first; tie-break on reaction desc.
   holdings.sort((a, b) => a.entryDate < b.entryDate ? 1 : a.entryDate > b.entryDate ? -1 : b.reaction - a.reaction);
 
-  return {
+  const result = {
     success: true, asOf,
     params: {
       rule: 'Q5 earnings-reaction ∩ momentum-aligned (combo≥0.5) ∩ volume-confirmed',
@@ -198,4 +207,6 @@ export async function getPeadScreen({ heldSyms = [] } = {}) {
     holdings,
     note: holdings.length ? null : 'No open PEAD candidates right now — event-driven, expect long quiet stretches between earnings seasons.',
   };
+  _cache = { at: Date.now(), asOf, data: result };
+  return result;
 }
