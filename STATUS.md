@@ -1,61 +1,58 @@
 # Project Status
 
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-22_
+
+## TL;DR
+
+One validated edge — **Sharia momentum combo** (deflated t ≈ 2.45, survived the kill-test) — plus a **seasonality drawdown overlay** and a **tiny borderline PEAD satellite**. All sizing/exposure levers are dead → momentum runs **plain equal-weight, hold the top 6–10 names, monthly**. Honest expectation **mid-teens %/yr** (20–30% is good-year variance, not a plan). The edge hunt is near-exhausted: ~30+ tests, 1 durable edge; the disciplined round-2 batch (volume-shock, crypto TSMOM, PEAD-hardening) went **0/3**. The money is now in **operating** the edge well, not finding a fifth factor.
+
+## Validated edge set
+
+- **Sharia momentum combo** — `mom6 × 52-week-high` rank combo, top-quintile, monthly, equal-weight, liquid-half, ≥2y-listed, Derayah 0.11% RT. **Live in `getMomentumScreen` → decision view / CLI / state machine.**
+  - **Kill-test PASSED (2026-06-22):** after a survivorship haircut (1–1.5%/yr → t ≈ 2.9–3.0) AND a multiple-testing deflation (~15 specs, ρ≈0.6–0.9, Meff 3–6 → Harvey-Liu t 2.35–2.60), the combo holds at **deflated t ≈ 2.45 (>2)**. Real and tradeable — but size it as a t≈2.4 single anomaly, not a fortress. (`scripts/killtest_survivorship.mjs`)
+  - **Grader leaks FIXED:** `strategy_validation.mjs` had been grading **plain mom6 (not the live combo)** and applying **today's Sharia set retroactively**. Fixed → leak-free in-sample guillotine **t 3.23** (removing the leaks *raised* it from 2.71). The Lab now reports the honest number.
+  - **Concentration finding:** holding the **top-ranked** 6–10 names does NOT dilute the edge (top-10 t 3.97, top-8 3.35, top-6 2.81, top-4 3.10 — the rank carries return). The risk is *which* names: a *random* 4-slice averages +16%/yr excess but ±6.2pp. **Rule: hold ~6–10 top-ranked names, not an arbitrary 4.** (`scripts/breadth_test.mjs`)
+- **Seasonality** — sit out the 2 weakest calendar months. A **drawdown overlay, not a return edge** (OOS return gate fails t 0.57; DD reduction ~4.8pp robust). Correctly scoped, kept.
+- **Conditioned PEAD** — small **borderline** 2nd sleeve (~10% risk budget). Gate PASS at 0.11% (guillotine t 2.14, n=118, **orthogonal to momentum r ≈ 0**) but cost-fragile (fails at 0.30%) and front-loaded. **Wired live**: `dashboard/pead_screen.mjs` + `/api/lab/pead` + a card on the Momentum tab (EXPERIMENTAL framing, 6h-TTL cached). Event-driven → empty between earnings seasons.
+
+## Sizing — all levers dead → plain equal-weight
+
+The board's "smarter sizing doubles growth" is **refuted**. Vol-target, fractional-Kelly conviction, and the drawdown-brake (200d-MA regime, walk-forward) all KILLED; momentum × low-vol and inverse-vol weighting both REJECTED (DD cut ~1pp vs the ≥3pp bar). **Momentum runs plain equal-weight, monthly, no exposure overlay** (seasonality sit-out is the one kept risk overlay). The strategy state machine still auto-tempers exposure (see below) — that's a governor, not an alpha lever.
 
 ## Strategy state machine (live)
 
-- **momentum-sharia** — **PROMOTED, auto-tempered to `decaying` (×0.5)**.
-  - Manually promoted 2026-06-21; the promotion gate was met: excess t=2.46 (>2), 65 rebalance periods (≥24), both halves stable (1.64 / 1.82 > 1.5).
-  - The daily auto-governor immediately risk-halved it to `decaying` because the rolling-12 window is soft (mean +1.01%/period, t 1.86 < 2, drawdown −24.5%).
-  - **Effect:** live at **half sizing** — the momentum screen deploys ~48% (Scheme-D vol-target × in-season × 0.5) instead of 0%.
-  - Auto-restores to ×1.0 when the rolling window strengthens; auto-cuts further if it weakens. No manual demote endpoint by design (downgrade is automatic only).
-  - State persists in the local SQLite DB (not version-controlled).
+- **momentum-sharia — PROMOTED, auto-tempered to `decaying` (×0.5).** Rolling-12 soft (mean +1.01%/period, t 1.86<2, DD −24.5%) → governor halves exposure. Auto-restores to ×1.0 when the window strengthens. Persists in local SQLite (not version-controlled). No manual demote by design.
 
-## Validated edge
+## Dead / rejected signals (do not relitigate)
 
-- **Sharia momentum** (top-quintile, monthly, equal-weight, liquid-half, ≥2y-listed) on Derayah (0.11% RT) is the **one validated edge**. **Core signal upgraded 2026-06-22 to the `mom6 × 52-week-high` rank combo** (was 6-1mo momentum alone): gate per-period **t 3.38**, OOS halves 1.90/3.60, **9/9 positive years**, cost-robust (t 2.88 @0.30%) — strictly beats mom6-alone (t 2.28, H1 fails, 2 negative years). Now live in `getMomentumScreen` → decision view / CLI / state-machine. Absolute CAGR carries an accepted ~1–1.5%/yr survivorship haircut. Sizing = **Scheme-D** (vol-target 15% + seasonal sit-out), governed by the state machine above.
-- **Seasonality** (sit out the 2 weakest calendar months) — a **drawdown overlay, not a return edge**. Audited under the gate (`scripts/seasonality_guillotine_test.mjs`): OOS return gate FAILS (t 0.57, Δ CAGR +1.7% thin) but drawdown reduction is robust (~4.8pp). Correctly scoped — confirmed, not downgraded.
-- **Dead/noise signals — culled from deciding paths:** the 9-pt score (relabeled context-only) and **whale_score** (MFI+OBV+vol-z heuristic, showdown t −1.47 / −8.9%/yr) both fail. whale_score was still gating the "Smart Money" signal, adding conviction points, setting the 360 institutional pillar, and badging the table — all stripped (2026-06-21); kept only as raw data + a descriptive "Whale X/10 at entry" label. Block-deals = EXPERIMENTAL (fails gate t 1.94, underpowered). Contract-flow = dead (t 0.90).
-- **Govt contract-flow — TESTED & FAILED (2026-06-21), not an edge.** Briefly thought confirmed on a pooled NW-t 2.94, but that was cross-sectional-clustering + wrong-benchmark (^TASI) inflation — the same trap that killed the 9-pt score. Under the proper per-period guillotine (equal-weight basket, one obs/non-overlapping window) the t collapses to 0.90 and the govt−private spread to +0.09% (t 0.09). Dashboard card removed. Record kept in `scripts/contract_flow_guillotine_test.mjs`.
+9-pt TA score (per-period t 0.74, relabeled context-only), whale_score (noise, culled from all deciding/UI paths), govt contract-flow (guillotine t 0.90), dividend (beta, excess +0.10%), MSCI/flow front-running (t −1.18, run-up pre-announcement), block deals (EXPERIMENTAL, t 1.94, underpowered), value-via-price long-term reversal (corr 0.36 w/ momentum or fails). **Round-2 batch (2026-06-22), 0/3 promoted:** volume-shock reversal DEAD (guillotine t 0.63; only the *continuation* leg is significant, t~4 — untradeable chase), crypto TSMOM (BTC/ETH 200d) SHELVED (Sharpe passes but maxDD cut only 16–21% vs ≥30% gate — a mild risk overlay on crypto already held, not alpha), conditioned-PEAD cost-hardening FAIL/closed (no refinement clears t>2 at 0.30%; longer-hold near-miss t 1.91).
 
-## Above-modest research verdicts (2026-06-21)
+## Operating the strategy (this month)
 
-Four upside layers tested under OOS-aware discipline:
+Paper book set to the operating spec: **top 8 clean combo names, equal-weight, ~50% deployed** (DECAYING governor), dropping the debt-near-line names (1304, 2050) pending AAOIFI check. Real-account order list produced; rebalance **July 1**. `npm run decision --acct 100000` reproduces it (state → sizing → BUY/HOLD/SELL → SAR-per-name → ⚠ debt-≥50% flags). Flags: `--acct N`, `--json`, `--quiet`, `--held "1120,2222"`.
 
-| Layer | Verdict |
-|---|---|
-| #1 Compounding-geometry sizing (vol-target / conviction / drawdown-brake) | **All killed** — walk-forward refuted the brake (insurance, not edge) |
-| #2 Flow / MSCI-rebalance front-running | **NO SIGNAL** — move is spent before the public announcement |
-| #3 PEAD (earnings-drift) | **NO SIGNAL** — drift U-shaped, not monotonic; season-OOS flips |
-| #4 Govt / Vision-2030 contract-flow | **TESTED & FAILED** — looked confirmed on pooled NW-t 2.94, but the per-period guillotine collapsed it to t 0.90 (spread t 0.09). Clustering + ^TASI-benchmark inflation, same as the 9-pt score. Not an edge. |
+## Standing research discipline (adopted 2026-06-22)
 
-Momentum equal-weight remained the strongest — and only — return engine that survives the honest per-period test.
+Pre-register hypothesis/universe/signal/holding/cost **and spec count** before any backtest; **cap ~5 new specs per arc**; bar rises with N (**deflated-t ≥ 3** vs the full ~35-trial count); mandatory OOS `portfolioGuillotine` (pooled NW-t ≠ the gate); **kill-by-default — no "experimental/borderline purgatory."**
 
-### Govt contract-flow — tested and rejected (2026-06-21)
+## Visual redesign (shipped 2026-06-22)
 
-Initially looked like a 2nd edge: after cracking the saudiexchange.sa harvest (JSON endpoint in-page, bypasses Akamai + reCAPTCHA; `harvest_catalysts.mjs` rewritten around it — contracts 207→2,392, 2021→2026), `contract_flow_test.mjs` reported govt∩liquid +1.15%/20d at NW-t 2.94. **But that test used the condemned ^TASI cap-weighted benchmark and NW-t on a pooled list of overlapping, calendar-clustered events — the exact inflation that made the dead 9-pt score's pooled t=3.89 look real.** Re-run through the per-period guillotine (`contract_flow_guillotine_test.mjs`: equal-weight basket, one obs/non-overlapping 20-session window, 60 periods ~4.8y): govt∩liquid excess +0.87%/pd but **t 0.90**, govt−private spread **+0.09% t 0.09**. **NOT a validated edge.** Dashboard card + route + signal module removed; harvester + helpers + both research scripts kept as the record. Lesson: pooled NW-t is not a substitute for the cross-clustering-robust per-period test — no signal earns "validated" without it.
+B+C hybrid design-system refresh merged to `main`: violet→indigo tokens, editorial + fintech-polish across all 8 tabs, Momentum/Goals hero, drawer "Volume Flow" restyle. Also fixed a live `_oppCache` ReferenceError that had been crashing **every** drawer open. CI honesty guard + drawer smoke test added.
 
-## Decision view (shipped)
+## Honest ceiling
 
-The Signals/Momentum tab is now a monthly decision: strategy-state badge → Scheme-D sizing % (with breakdown) → **BUY / HOLD / SELL** vs your logged positions → SAR-per-name calculator → next rebalance date → **Block-Deal Watch 🐋** card (relabeled EXPERIMENTAL — see below). Hand-entered holdings normalize to `TADAWUL:<code>` so turnover matches.
-
-### Block-deals — DOWNGRADED to experimental (2026-06-21)
-
-Was logged as a "validated 2nd edge" (modest), but that rested on an overlap-corrected oc-t ~1.9 — already below t>2. Audited through the event-level `portfolioGuillotine` (enter at deal, hold 20, excess vs equal-weight basket, one obs per non-overlapping bucket): BIG premium/at-market +1.54%/bucket, **t 1.94 < 2 → FAILS the gate**. Unlike contract-flow (well-powered, t 0.90 = dead), block-deals is **underpowered** (only ~1y of deal history → 14 buckets) and just under the bar — marginal/suggestive, not refuted. Dashboard card relabeled "Block-Deal Watch — EXPERIMENTAL, not a validated edge"; kept for awareness, not sizing. Resolve by re-harvesting Argaam past ~30 buckets. Test: `scripts/blockdeal_guillotine_test.mjs`.
-
-**CLI: `npm run decision`** — the same monthly call without the dashboard server. Prints state → sizing → account split → next rebalance → BUY/HOLD/SELL with live prices, momentum, ~share counts, and ⚠ debt-≥50% flags. Flags:
-- `--acct N` — account size for SAR sizing (default 100k)
-- `--json` — machine-readable (implies `--quiet`); for `clean | jq` use `npm run --silent decision -- --json` or call node directly
-- `--quiet` — mute the db boot log
-- `--held "1120,2222"` — what-if HOLD/SELL vs a hypothetical book (ignores DB)
-
-Pure helpers (`normalizeHeld`, `computeTurnover`, `sarPerName`) unit-tested incl. the `--held`→turnover path.
-
-## Open threads (require user action)
-
-- **Contract-flow ❌ TESTED & REJECTED** (2026-06-21) — failed the per-period guillotine (t 0.90, spread t 0.09); dashboard card removed. The harvester rewrite (JSON API, contracts 207→2,392) is the lasting win and stays. Re-harvest any time: `HEADLESS=false node --experimental-sqlite scripts/harvest_catalysts.mjs`.
-- **Operate it** — trade the monthly momentum picks on Derayah (`npm run decision`), log positions back, build a live track record.
+~9% / 9,000-SAR goal: comfortably reachable. **Mid-teens %/yr is the realistic mean; 20–30% is good-year variance, not an engineered target** — the uncorrelated 2nd engine that would lift the mean has been hunted ~30 times and not appeared. Biggest return lever = operating momentum at high fidelity (6–10 names, monthly discipline), not new factors.
 
 ## Tests
 
-Full runnable suite green: `test:unit` 29 · `test:strategy` 23 · `test:money` 114. (e2e needs a live TradingView CDP session; not run here.)
+`test:money` **122** · `test:strategy` **23** · `test:honesty` **2** · `test:drawer` 18 rows clean · `pw-verify` 8 tabs / 0 console errors (LTR + RTL). e2e needs a live TradingView CDP session (not run).
+
+## Open threads
+
+- **Operate it** — trade the monthly momentum picks on Derayah, log positions back (`npm run decision`), build a live track record. This is now the primary work, not more research.
+- **Block-deal re-test** — only remaining untested flow signal with positive shape; data-gated (needs a headed Argaam harvest past ~30 buckets).
+- **Reserve idea (not yet run):** buyback / treasury-purchase under-reaction — harvest the saudiexchange JSON feed to >150 events *before* testing (currently 92 = block-deal-grade thin).
+
+## Reference docs (this session)
+
+`docs/research/2026-06-22-independent-review-edge-plan.md` (board judged) · `-edge-plan-results.md` (Phases 0–2) · `-killtest-survivorship-multipletesting.md` · `-new-approaches-consult.md` (round 2) · `-volume-shock.md` · `-crypto-tsmom.md` · `-pead-hardening.md` · `-pead-conditioned.md` · `-momentum-lowvol.md` · `-drawdown-brake.md`. Design: `docs/superpowers/specs|plans/2026-06-22-visual-redesign*`.
