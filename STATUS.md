@@ -8,10 +8,10 @@ One validated edge — **Sharia momentum combo** (deflated t ≈ 2.45, survived 
 
 ## Validated edge set
 
-- **Sharia momentum combo** — `mom6 × 52-week-high` rank combo, top-quintile, monthly, equal-weight, liquid-half, ≥2y-listed, Derayah 0.11% RT. **Live in `getMomentumScreen` → decision view / CLI / state machine.**
+- **Sharia momentum combo** — `mom6 × 52-week-high` rank combo, top-quintile **capped at top 8 by rank**, monthly, equal-weight, liquid-half, ≥2y-listed, Derayah 0.11% RT. **Live in `getMomentumScreen` → decision view / CLI / state machine.**
   - **Kill-test PASSED (2026-06-22):** after a survivorship haircut (1–1.5%/yr → t ≈ 2.9–3.0) AND a multiple-testing deflation (~15 specs, ρ≈0.6–0.9, Meff 3–6 → Harvey-Liu t 2.35–2.60), the combo holds at **deflated t ≈ 2.45 (>2)**. Real and tradeable — but size it as a t≈2.4 single anomaly, not a fortress. (`scripts/killtest_survivorship.mjs`)
   - **Grader leaks FIXED:** `strategy_validation.mjs` had been grading **plain mom6 (not the live combo)** and applying **today's Sharia set retroactively**. Fixed → leak-free in-sample guillotine **t 3.23** (removing the leaks *raised* it from 2.71). The Lab now reports the honest number.
-  - **Concentration finding:** holding the **top-ranked** 6–10 names does NOT dilute the edge (top-10 t 3.97, top-8 3.35, top-6 2.81, top-4 3.10 — the rank carries return). The risk is *which* names: a *random* 4-slice averages +16%/yr excess but ±6.2pp. **Rule: hold ~6–10 top-ranked names, not an arbitrary 4.** (`scripts/breadth_test.mjs`)
+  - **Concentration finding → now enforced as a hard top-8 cap (2026-06-22).** Holding the **top-ranked** 6–10 names does NOT dilute the edge (top-10 t 3.97, top-8 3.35, top-6 2.81, top-4 3.10 — the rank carries return); the full ~15-name quintile dilutes into lower-conviction names. The screen now caps at **`maxHoldings=8`** (`getMomentumScreen`, `k = min(8, quintile)`), applied everywhere (decision CLI, `/api/lab/momentum`, goals, saved snapshot). Validation unaffected (grader baskets independently). The risk is *which* names: a *random* 4-slice averages +16%/yr excess but ±6.2pp — the cap takes the **top-ranked** 8, not an arbitrary slice. (`scripts/breadth_test.mjs`)
 - **Seasonality** — sit out the 2 weakest calendar months. A **drawdown overlay, not a return edge** (OOS return gate fails t 0.57; DD reduction ~4.8pp robust). Correctly scoped, kept.
 - **Conditioned PEAD** — small **borderline** 2nd sleeve (~10% risk budget). Gate PASS at 0.11% (guillotine t 2.14, n=118, **orthogonal to momentum r ≈ 0**) but cost-fragile (fails at 0.30%) and front-loaded. **Wired live**: `dashboard/pead_screen.mjs` + `/api/lab/pead` + a card on the Momentum tab (EXPERIMENTAL framing, 6h-TTL cached). Event-driven → empty between earnings seasons.
 
@@ -29,7 +29,7 @@ The board's "smarter sizing doubles growth" is **refuted**. Vol-target, fraction
 
 ## Operating the strategy (this month)
 
-Paper book set to the operating spec: **top 8 clean combo names, equal-weight, ~50% deployed** (DECAYING governor), dropping the debt-near-line names (1304, 2050) pending AAOIFI check. Real-account order list produced; rebalance **July 1**. `npm run decision --acct 100000` reproduces it (state → sizing → BUY/HOLD/SELL → SAR-per-name → ⚠ debt-≥50% flags). Flags: `--acct N`, `--json`, `--quiet`, `--held "1120,2222"`.
+The screen now caps at the **top 8 by rank** (`maxHoldings=8`). **July plan SAVED** (`decision --save`, period **2026-07-01**): 8 names, equal-weight, **SAR 4,875/name, 39% deployed** on a 100k account (DECAYING ×0.5 governor + vol-target on the tighter, higher-vol 8-name book). `npm run decision -- --save --acct <SAR>` reproduces + re-saves at your real size (state → sizing → BUY/HOLD/SELL → SAR-per-name → ⚠ debt-≥50% flags). Flags: `--acct N`, `--save`, `--json`, `--quiet`, `--held "1120,2222"`. **Two of the top 8 (1304 ~59%, 2050 ~64%) are debt ≥50%** — confirm AAOIFI or drop to a 6-name clean book. This is the first real operating cycle; trade on Derayah, then `log-fill` → Plan vs Actual.
 
 ## Fill-logger loop (shipped 2026-06-22)
 
