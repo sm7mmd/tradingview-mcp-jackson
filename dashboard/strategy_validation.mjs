@@ -12,7 +12,6 @@
  */
 import { getBars, warm, iso } from '../scripts/bars_cache.mjs';
 import { TASI_STOCKS, toYahooSym } from '../scripts/tasi_screener.mjs';
-import { getShariaStatus } from './sharia.mjs';
 import { evaluate, transitions } from './strategy_state.mjs';
 
 const H = 20, MIN_HISTORY = 210, COST_RT = +process.env.COST_RT || 0.0011;
@@ -55,7 +54,12 @@ export function bustCache() { _cache = null; }
 export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
   if (_cache && Date.now() - _cache.at < ttlMs) return _cache.data;
 
-  const compliant = new Set(TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant').map(s => s.sym));
+  // LEAK FIX (Sharia): we do NOT intersect the historical backtest universe with today's
+  // compliant set. sharia_data.json has a single `asOf` per name (no dated history), so
+  // applying it to 2020-2026 rebalances is retroactive look-ahead (a name compliant today
+  // may not have been then, and vice-versa). Sharia is a LIVE-ONLY filter, applied at
+  // screen time in momentum_screen.mjs — not baked into the historical grade. The grade
+  // therefore runs on the full liquid universe; this is the honest, leak-free measurement.
   await warm(TASI_STOCKS.map(s => toYahooSym(s.sym)).concat('^TASI.SR'), '10y');
 
   const data = {};
@@ -76,15 +80,28 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     const bench = ew(date); if (bench == null) continue;
     const rows = [];
     for (const s of usable) {
-      if (!compliant.has(s)) continue; const d = data[s]; const i = d.idx[date];
+      // No compliant-Set intersection here — Sharia is a live-only filter (see note above).
+      const d = data[s]; const i = d.idx[date];
       if (i == null || i < 504 || i + H >= d.c.length) continue;
       const mom6 = d.c[i - 21] / d.c[i - 126] - 1; if (!isFinite(mom6)) continue;
+      // 52-week-high proximity, point-in-time: only bars up to the rebalance index i.
+      let hi52 = -Infinity; for (let k = Math.max(0, i - 251); k <= i; k++) hi52 = Math.max(hi52, d.c[k]);
+      const wk52 = hi52 > 0 ? d.c[i] / hi52 : null;
       let liq = 0, n = 0; for (let k = Math.max(0, i - 59); k <= i; k++) { liq += d.c[k] * (d.v[k] || 0); n++; }
-      rows.push({ s, mom6, liq: liq / n });
+      rows.push({ s, mom6, wk52, liq: liq / n });
     }
     if (rows.length < 10) continue;
     const liquid = [...rows].sort((a, b) => b.liq - a.liq).slice(0, Math.ceil(rows.length * 0.5));
-    const picks = [...liquid].sort((a, b) => b.mom6 - a.mom6).slice(0, Math.max(5, Math.floor(liquid.length * 0.2))).map(r => r.s);
+    // CORE SIGNAL = the LIVE combo (mirrors momentum_screen.mjs lines 99-108): rank-average
+    // of 6-1mo momentum percentile + 52-week-high proximity percentile, computed WITHIN the
+    // liquid pool at this rebalance (point-in-time). Falls back to mom6-only when wk52 sparse.
+    const both = liquid.filter(r => r.wk52 != null);
+    const pool = both.length >= 10 ? both : liquid;
+    const pctRank = (arr, key) => { const a = [...arr].sort((x, y) => x[key] - y[key]); a.forEach((r, j) => r['_r_' + key] = arr.length > 1 ? j / (arr.length - 1) : 0.5); };
+    pctRank(pool, 'mom6');
+    if (pool === both) pctRank(pool, 'wk52');
+    pool.forEach(r => r.combo = pool === both ? (r._r_mom6 + r._r_wk52) / 2 : r._r_mom6);
+    const picks = [...pool].sort((a, b) => b.combo - a.combo).slice(0, Math.max(5, Math.floor(pool.length * 0.2))).map(r => r.s);
     const rs = picks.map(s => fwd(s, date)).filter(r => r != null); if (!rs.length) continue;
     const port = mean(rs) - COST_RT;
     periods.push({ date, year: +date.slice(0, 4), n: picks.length, excess: port - bench, abs: port });
@@ -135,7 +152,7 @@ export async function getStrategyValidation({ ttlMs = 6 * 3600 * 1000 } = {}) {
     ok: true, asOf: cal.at(-1), cost_rt: COST_RT,
     strategies: [{
       id: 'momentum-sharia', name: 'Momentum (Sharia)',
-      spec: 'compliant ∩ liquid-half ∩ ≥2y · top-quintile 6-1mo momentum · monthly · equal-weight',
+      spec: 'liquid-half ∩ ≥2y · top-quintile (6-1mo × 52wk-high rank combo) · monthly · equal-weight · Sharia applied live (not in grade)',
       status: stRes.state, statusWhy,
       exposure_mult: stRes.exposure_mult,
       recommendedAction: stRes.recommendedAction,
