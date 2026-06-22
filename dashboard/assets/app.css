@@ -204,28 +204,29 @@ main { padding:20px 24px; max-width:1440px; margin:0 auto; }
 
 /* ── Table — premium data surface ── */
 .table-wrap {
+  display:flex; flex-direction:column;
   background:var(--card);
-  border:1px solid var(--glass-border);
-  border-radius:var(--radius-lg); overflow:clip;
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg); overflow:auto;
   box-shadow:var(--shadow-card);
 }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 thead th {
-  position:sticky; top:56px; z-index:100;
-  background:var(--bg2);
-  padding:9px 12px; text-align:start;
-  font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.8px;
-  color:var(--text3); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:2;
+  background:var(--card);
+  padding:13px 16px; text-align:start;
+  font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text3); border-bottom:1px solid var(--border2);
   cursor:pointer; user-select:none; white-space:nowrap;
   font-family:"Geist",sans-serif;
   transition:color .15s;
 }
 thead th:hover { color:var(--text2); }
 thead th.sorted { color:var(--accent); }
-tbody tr { border-bottom:1px solid rgba(255,255,255,.04); transition:background .15s var(--ease-out); cursor:pointer; }
-tbody tr:last-child { border-bottom:none; }
-tbody tr:hover { background:rgba(255,255,255,.03); }
-td { padding:9px 12px; vertical-align:middle; }
+tbody tr { transition:background .14s var(--ease-out); cursor:pointer; }
+tbody tr:last-child td { border-bottom:0; }
+tbody tr:hover { background:rgba(255,255,255,.025); }
+tbody td { padding:13px 16px; vertical-align:middle; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
 .cb-cell { width:36px; padding-inline-start:14px; }
 .row-cb { width:15px; height:15px; cursor:pointer; accent-color:var(--accent); }
 tr.selected-row { background:var(--blue-dim) !important; }
@@ -1545,7 +1546,7 @@ header::after {
     rgba(0,230,118,.45) 62%,
     transparent 100%);
 }
-thead th { top: 56px; }
+thead th { top: 0; }
 .logo { font-size: 16px; font-weight: 800; letter-spacing: -.01em; }
 .logo-icon {
   width: 30px; height: 30px; border-radius: 9px;
@@ -1628,7 +1629,7 @@ thead th { top: 56px; }
    TABLE — premium data surface
    ════════════════════════════════════════════════════════════ */
 .table-wrap {
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   border-color: var(--border);
   box-shadow: var(--shadow-card);
 }
@@ -1636,32 +1637,32 @@ thead th { top: 56px; }
 table { font-size: 12.5px; }
 
 thead th {
-  padding: 11px 14px;
-  background: rgba(7,10,17,.98);
-  letter-spacing: 1px;
-  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  background: var(--card);
+  letter-spacing: .05em;
+  border-bottom: 1px solid var(--border2);
 }
 
-td { padding: 11px 14px; }
+tbody td { padding: 13px 16px; }
 
-tbody tr { border-bottom: 1px solid rgba(255,255,255,.03); }
+tbody tr { border-bottom: 0; }
 
 /* ── Signal-aware rows via CSS :has() ── */
 /* row accents follow the trend-state temperature scale (teal=uptrend, amber=downtrend) */
-tbody tr:has(.bias-strong-buy) { border-inline-start: 2px solid rgba(45,212,191,.5); }
+tbody tr:has(.bias-strong-buy) { border-inline-start: 2px solid var(--green); }
 tbody tr:has(.bias-strong-buy):hover { background: rgba(45,212,191,.05) !important; }
 
-tbody tr:has(.bias-buy) { border-inline-start: 2px solid rgba(45,212,191,.32); }
+tbody tr:has(.bias-buy) { border-inline-start: 2px solid rgba(55,211,153,.5); }
 tbody tr:has(.bias-buy):hover { background: rgba(45,212,191,.035) !important; }
 
-tbody tr:has(.bias-watch) { border-inline-start: 2px solid rgba(130,170,210,.30); }
+tbody tr:has(.bias-watch) { border-inline-start: 2px solid var(--yellow); }
 tbody tr:has(.bias-watch):hover { background: rgba(130,170,210,.03) !important; }
 
-tbody tr:has(.bias-strong-sell) { border-inline-start: 2px solid rgba(255,145,0,.5); }
+tbody tr:has(.bias-strong-sell) { border-inline-start: 2px solid var(--red); }
 tbody tr:has(.bias-strong-sell):hover { background: rgba(255,145,0,.05) !important; }
 
 tbody tr:has(.bias-sell),
-tbody tr:has(.bias-avoid) { border-inline-start: 2px solid rgba(255,170,40,.36); }
+tbody tr:has(.bias-avoid) { border-inline-start: 2px solid rgba(255,107,107,.5); }
 tbody tr:has(.bias-sell):hover,
 tbody tr:has(.bias-avoid):hover { background: rgba(255,170,40,.035) !important; }
 
@@ -2837,28 +2838,37 @@ tbody tr {
 
 /* ── Table: tighter, more premium ── */
 .table-wrap {
-  border-radius: 16px !important;
-  border: 1px solid rgba(255,255,255,.06) !important;
-  overflow: clip !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 8px 40px rgba(0,0,0,.5) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--card) !important;
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border) !important;
+  overflow: auto !important;
+  box-shadow: var(--shadow-card) !important;
 }
 thead th {
-  background: rgba(6,8,14,.99) !important;
+  background: var(--card) !important;
   color: var(--text3) !important;
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  letter-spacing: 1px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: .05em !important;
   text-transform: uppercase !important;
-  padding: 10px 14px !important;
-  border-bottom: 1px solid rgba(255,255,255,.05) !important;
+  padding: 13px 16px !important;
+  border-bottom: 1px solid var(--border2) !important;
   position: sticky;
-  top: 56px;
+  top: 0;
+  z-index: 2;
 }
 tbody tr {
-  border-bottom: 1px solid rgba(255,255,255,.03) !important;
-  transition: background .12s var(--ease-snappy) !important;
+  border-bottom: 0 !important;
+  transition: background .14s var(--ease-out) !important;
 }
-td { padding: 10px 14px !important; }
+tbody tr:last-child td { border-bottom: 0 !important; }
+tbody td {
+  padding: 13px 16px !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-variant-numeric: tabular-nums !important;
+}
 
 /* ── Empty state: composed, inviting ── */
 .empty-state {
