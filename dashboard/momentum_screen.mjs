@@ -67,7 +67,7 @@ export function sarPerName({ accountSize = 0, exposurePct = 0, nHoldings = 0 } =
   return { perName, totalDeployed, cash: Math.round(accountSize) - totalDeployed };
 }
 
-export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15, heldSyms = [] } = {}) {
+export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, minListingDays = 504, targetVol = 0.15, maxHoldings = 8, heldSyms = [] } = {}) {
   const compliant = TASI_STOCKS.filter(s => getShariaStatus(s.sym).status === 'compliant');
   const ysyms = compliant.map(s => toYahooSym(s.sym));
   await warm(ysyms, '10y');                       // cache-aware; refetches only if stale
@@ -106,7 +106,10 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   if (pool === both) pctRank(pool, 'wk52');
   pool.forEach(r => r.combo = pool === both ? (r._r_mom6 + r._r_wk52) / 2 : r._r_mom6);
   const ranked = [...pool].sort((a, b) => b.combo - a.combo);
-  const k = Math.max(5, Math.floor(ranked.length * quintileFrac));
+  // Top quintile, but capped at maxHoldings (default 8): the concentration research
+  // (breadth_test.mjs) shows the edge lives in the top ~6–10 ranks — holding the full
+  // quintile (~15) dilutes into lower-conviction names. Cap trims the tail, not the rank.
+  const k = Math.min(maxHoldings, Math.max(5, Math.floor(ranked.length * quintileFrac)));
   const holdings = ranked.slice(0, k).map((r, idx) => ({
     rank: idx + 1, sym: r.sym, code: r.code, name: r.name, price: r.price,
     mom6: +(r.mom6 * 100).toFixed(1), ret1m: +(r.ret1m * 100).toFixed(1),
@@ -185,7 +188,7 @@ export async function getMomentumScreen({ quintileFrac = 0.2, liquidFrac = 0.5, 
   return {
     success: true, asOf, nextRebalance,
     universe: { compliant: compliant.length, eligible: rows.length, liquid: liquid.length, holdings: holdings.length },
-    params: { lookback: '6-1mo momentum × 52-week-high (rank combo)', minListing: '≥2y listed', liquidFilter: 'liquid half', quintile: 'top 20%', rebalance: 'monthly', cost: '0.11% RT (Derayah)', weighting: `equal-weight (~${weight}% each)` },
+    params: { lookback: '6-1mo momentum × 52-week-high (rank combo)', minListing: '≥2y listed', liquidFilter: 'liquid half', quintile: `top 20%, capped at ${maxHoldings} names`, rebalance: 'monthly', cost: '0.11% RT (Derayah)', weighting: `equal-weight (~${weight}% each)` },
     validated: { excessPerYr: '+12 to +15%/yr', absCagr: '~15.6%/yr', perPeriodT: '3.38 (gate-passes; 2.88 at 0.30% cost)', oos: '9/9 positive years, both halves t>1.5', maxDD: 'better than basket', caveat: 'combo upgrade 2026-06-22 (beats 6-1mo alone); survivorship haircut ~1–1.5%/yr; confirm AAOIFI financial ratios per name before buying.' },
     seasonal,
     sizing,
