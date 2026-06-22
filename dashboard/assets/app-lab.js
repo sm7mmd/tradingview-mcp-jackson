@@ -700,6 +700,46 @@ async function loadMomentumScreen() {
   } catch(_) { el.innerHTML = `<div class="lab-insight-card"><div style="font-size:10px;color:var(--text3)">Momentum screen failed to load.</div></div>`; }
 }
 
+// ── PEAD Satellite: validated 2nd edge (conditioned PEAD, guillotine t 2.14) but BORDERLINE ──
+// Small orthogonal sleeve (~10% risk budget). Event-driven → usually empty between earnings seasons.
+async function loadPeadScreen() {
+  const el = document.getElementById('pead-content');
+  if (!el) return;
+  el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px"><div style="font-size:11px;color:var(--text3)">Loading PEAD satellite…</div></div>`;
+  try {
+    const d = await fetch('/api/lab/pead').then(r => r.json());
+    if (!d.success) { el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px"><div style="font-size:10px;color:var(--text3)">PEAD satellite unavailable: ${d.error || 'error'}</div></div>`; return; }
+    const st = d.status || {}, sz = d.sizing || {}, p = d.params || {};
+    const rows = (d.holdings || []).map(h => `<tr>
+      <td style="font-size:11px;font-weight:600;color:var(--text)">${h.name} <span style="color:var(--text3);font-weight:400">${h.code}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${h.price}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;font-weight:700;color:var(--green)">+${(h.reaction).toFixed?.(1) ?? h.reaction}%</td>
+      <td style="font-size:10px;text-align:end;color:var(--text3)">${h.entryDate || '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:center;color:var(--text2)">${h.sessionsRemaining ?? '—'}</td>
+    </tr>`).join('');
+    const body = (d.holdings || []).length
+      ? `<div class="lab-table-wrap"><table class="lab-table">
+          <thead><tr>
+            <th title="Company that just reported earnings with a strong reaction, while in a momentum uptrend.">Name</th>
+            <th style="text-align:end">Price</th>
+            <th style="text-align:end" title="Earnings-day abnormal reaction vs the market — the surprise that drives the drift.">Reaction</th>
+            <th style="text-align:end" title="Buy 2 sessions after the earnings reaction.">Entry</th>
+            <th style="text-align:center" title="Sessions left in the ~20-session (1-month) hold before you exit.">Days left</th>
+          </tr></thead>
+          <tbody>${rows}</tbody></table></div>
+         <div style="font-size:9px;color:var(--text3);margin-top:8px">${sz.note || ''} Exit each name at the end of its ~20-session window.</div>`
+      : `<div style="font-size:11px;color:var(--text2);padding:10px 0;line-height:1.6">${d.note || 'No open PEAD candidates right now.'}</div>`;
+    el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px;border-color:var(--yellow)55">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:800;color:var(--text)">🛰 PEAD Satellite</span>
+        <span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:10px;background:var(--yellow);color:#000">EXPERIMENTAL · 2nd sleeve</span>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:10px" title="A second, smaller strategy: when a stock that's already in a momentum uptrend reports earnings with a strong, high-volume market reaction, it tends to keep drifting up for about a month. Validated but borderline — keep it small.">${st.detail || 'Post-earnings drift, conditioned on momentum + volume. Small experimental sleeve.'} <span style="color:var(--text3)">Rule: ${p.rule || ''} · hold ${p.hold || ''}.</span></div>
+      ${body}
+    </div>`;
+  } catch(_) { el.innerHTML = `<div class="lab-insight-card" style="margin-top:12px"><div style="font-size:10px;color:var(--text3)">PEAD satellite failed to load.</div></div>`; }
+}
+
 // ── Block-Deal Watch: EXPERIMENTAL — fails the per-period gate (t 1.94), underpowered ~1y ──
 async function loadBlockDealSignal() {
   const el = document.getElementById('blockdeal-content');
