@@ -30,13 +30,16 @@ async function loadDeps() {
   try {
     const db = await import('../dashboard/db.js');
     const fills = await import('../dashboard/fills.mjs');
-    return { realFills: db.realFills, summarize: fills.summarize };
+    const tracking = await import('../dashboard/tracking.mjs');
+    return { realFills: db.realFills, decisionSnapshots: db.decisionSnapshots,
+             summarize: fills.summarize, compareToSnapshot: tracking.compareToSnapshot };
   } finally {
     console.log = orig;
   }
 }
 
 const fmt = (n) => (n >= 0 ? '+' : '−') + Math.abs(Math.round(n)).toLocaleString('en-US');
+const pct1 = (n) => (n >= 0 ? '+' : '−') + Math.abs(+n).toFixed(1) + '%';   // slippage keeps a decimal
 const sar = (n) => 'SAR ' + Math.round(n).toLocaleString('en-US');
 
 // "1120:102,2222:30" → { 'TADAWUL:1120': 102, 'TADAWUL:2222': 30 }
@@ -51,14 +54,16 @@ function parsePrices(raw) {
   return out;
 }
 
-function printList(realFills, summarize) {
+function printList(realFills, summarize, decisionSnapshots, compareToSnapshot) {
   const ledger = realFills.getAll();
   const book   = realFills.book();
   const prices = parsePrices(arg('--prices'));
   const sum    = summarize(book, prices);
+  const snapshot = decisionSnapshots.getLatest();
+  const track    = snapshot ? compareToSnapshot(snapshot, book) : null;
 
   if (JSON_OUT) {
-    console.log(JSON.stringify({ ledger, open: book.open, realized: book.realized, realizedBySym: book.realizedBySym, summary: sum }));
+    console.log(JSON.stringify({ ledger, open: book.open, realized: book.realized, realizedBySym: book.realizedBySym, summary: sum, tracking: track }));
     return;
   }
 
@@ -93,13 +98,33 @@ function printList(realFills, summarize) {
   }
   console.log(`    open basis  ${sar(sum.costBasis)}`);
 
+  // Plan vs Actual — execution fidelity against the saved decision snapshot.
+  if (track) {
+    const s = track.summary;
+    console.log(`\n  PLAN vs ACTUAL   (plan for ${s.period}, as of ${s.asOf})`);
+    console.log(`    coverage ${s.coveragePct}%  ·  ${s.held}/${s.planCount} plan names held` +
+      (s.missed ? `  ·  ${s.missed} missed` : '') + (s.partial ? `  ·  ${s.partial} partial` : '') +
+      (s.offPlan ? `  ·  ${s.offPlan} off-plan` : ''));
+    if (s.avgEntrySlippagePct != null) console.log(`    avg entry slippage ${pct1(s.avgEntrySlippagePct)} vs decision price` +
+      `  ·  intended ${sar(s.intendedBasis)} → actual ${sar(s.actualBasis)}`);
+    const tag = { filled: '✓ filled ', partial: '~ partial', missed: '✗ missed ', off_plan: '! offplan' };
+    for (const row of track.rows) {
+      const slip = row.slippagePct != null ? `slip ${pct1(row.slippagePct)}` : '';
+      const rank = row.rank != null ? `#${String(row.rank).padEnd(2)}` : '   ';
+      console.log(`    ${tag[row.status]} ${rank} ${(row.sym || '').replace('TADAWUL:', '').padEnd(8)} ` +
+        `tgt ${String(row.targetShares ?? '—').padStart(5)} sh @ ${String(row.decisionPrice ?? '—').padStart(7)}  ` +
+        `held ${String(row.actualShares).padStart(5)} @ ${String(row.avgCost ?? '—').padStart(7)}  ${slip}`);
+    }
+  }
+
   console.log('\n' + line);
   console.log('  Fills are the source of truth. `npm run decision` now reads these as HOLD/SELL.');
+  if (!track) console.log('  Save a plan to track execution: npm run decision -- --save');
   console.log(line + '\n');
 }
 
 async function main() {
-  const { realFills, summarize } = await loadDeps();
+  const { realFills, summarize, decisionSnapshots, compareToSnapshot } = await loadDeps();
 
   // --remove N
   const rm = arg('--remove');
@@ -113,7 +138,7 @@ async function main() {
   // --list (default when no buy/sell)
   const isBuy = has('--buy'), isSell = has('--sell');
   if (has('--list') || (!isBuy && !isSell)) {
-    printList(realFills, summarize);
+    printList(realFills, summarize, decisionSnapshots, compareToSnapshot);
     process.exit(0);
   }
 

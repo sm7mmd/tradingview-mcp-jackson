@@ -14,6 +14,7 @@
  *   npm run --silent decision -- --json | jq      # clean pipe (--silent drops npm's own run banner)
  *   node --experimental-sqlite scripts/decision.mjs --json | jq   # or call node directly
  *   npm run decision -- --held "1120,2222"   # what-if HOLD/SELL vs these holdings (ignores DB)
+ *   npm run decision -- --save               # lock this month's plan as the tracking snapshot
  *
  * Note: prices/picks are point-in-time. Re-run on the rebalance morning before trading —
  * the list can shift. Debt/cash ratios shown are indicative; confirm AAOIFI per name.
@@ -22,6 +23,7 @@ const arg = (flag) => { const i = process.argv.indexOf(flag); return i > -1 ? pr
 const has = (flag) => process.argv.includes(flag);
 const ACCT = +(arg('--acct') || process.env.DECISION_ACCT || 100000);
 const JSON_OUT = has('--json');
+const SAVE = has('--save');                  // persist this month's plan as the tracking snapshot
 const QUIET = has('--quiet') || JSON_OUT;   // db.js logs "[db] migrated…" at import time
 // --held "1120,2222" → what-if HOLD/SELL preview without logging positions in the DB first.
 // Normalizes bare 4-digit codes to TADAWUL:xxxx (same rule as the Lab's addPosition). When
@@ -41,7 +43,10 @@ async function loadDeps() {
   try {
     const db = await import('../dashboard/db.js');
     const screen = await import('../dashboard/momentum_screen.mjs');
-    return { dbPositions: db.positions, getMomentumScreen: screen.getMomentumScreen, sarPerName: screen.sarPerName };
+    const tracking = await import('../dashboard/tracking.mjs');
+    return { dbPositions: db.positions, decisionSnapshots: db.decisionSnapshots,
+             getMomentumScreen: screen.getMomentumScreen, sarPerName: screen.sarPerName,
+             buildSnapshot: tracking.buildSnapshot };
   } finally {
     console.log = orig;
   }
@@ -61,7 +66,7 @@ function rowLine(h, perName) {
 }
 
 async function main() {
-  const { dbPositions, getMomentumScreen, sarPerName } = await loadDeps();
+  const { dbPositions, decisionSnapshots, getMomentumScreen, sarPerName, buildSnapshot } = await loadDeps();
   const heldSyms = HELD.length ? HELD : Object.keys(dbPositions.getAll() || {});
   const r = await getMomentumScreen({ heldSyms });
   if (!r.success) { console.error('FAILED:', r.error); process.exit(1); }
@@ -69,6 +74,14 @@ async function main() {
   const exposurePct = r.sizing?.breakdown?.finalExposurePct ?? 0;
   const nHold = r.holdings.length;
   const sar = sarPerName({ accountSize: ACCT, exposurePct, nHoldings: nHold });
+
+  // --save: persist this month's plan as the tracking snapshot (one per rebalance period).
+  // Fills logged later are measured against it via `log-fill --list` / the Lab card.
+  let saved = null;
+  if (SAVE) {
+    const snap = buildSnapshot({ screen: r, account: ACCT, perNameSAR: sar.perName });
+    if (snap) saved = decisionSnapshots.save(snap);
+  }
 
   // Machine-readable: stable shape for alerts/cron. Adds per-name share counts on top of
   // the raw screen payload; no terminal formatting.
@@ -89,6 +102,7 @@ async function main() {
       },
       holdings: r.holdings,
       validated: r.validated,
+      savedSnapshot: saved || null,
     }));
     process.exit(0);
   }
@@ -136,6 +150,8 @@ async function main() {
   console.log(`\n${line}`);
   console.log(`  Picks are point-in-time. ⚠ = debt ≥50% (near AAOIFI line) — confirm per name.`);
   console.log(`  Log fills (npm run log-fill -- --buy …) so next month shows real HOLD/SELL.`);
+  if (saved?.ok) console.log(`  ✓ Plan saved for ${saved.period} — log-fill --list now shows Plan vs Actual.`);
+  else console.log(`  Tip: add --save to lock this as the month's plan and track execution fidelity.`);
   console.log(line + '\n');
   process.exit(0);
 }

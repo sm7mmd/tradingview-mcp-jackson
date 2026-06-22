@@ -22,7 +22,8 @@ import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_
 import { portfolioGuillotine, tstat as gTstat } from '../dashboard/guillotine.mjs';
 import { normalizeWeights, computeRebalance, DEFAULT_WEIGHTS } from '../dashboard/allocation.mjs';
 import { computeBook, summarize } from '../dashboard/fills.mjs';
-import { db, realFills, positions } from '../dashboard/db.js';
+import { compareToSnapshot, buildSnapshot } from '../dashboard/tracking.mjs';
+import { db, realFills, positions, decisionSnapshots } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
 describe('scoreBias — swing mode (9-pt)', () => {
@@ -1004,5 +1005,123 @@ describe('realFills — positions projection stays consistent', () => {
     assert.ok(positions.getAll()[B], 'manual position should survive the fill sync');
     assert.equal(positions.getAll()[B].source, 'manual');
     db.prepare('DELETE FROM positions WHERE sym=?').run(B);
+  });
+});
+
+// ── Plan-vs-actual tracking (pure) ──────────────────────────────────────────
+describe('compareToSnapshot — execution fidelity', () => {
+  const snap = {
+    period: '2026-07-01', asOf: '2026-06-30',
+    picks: [
+      { sym: 'A', name: 'Alpha', rank: 1, price: 100, perNameSAR: 10000, targetShares: 100 },
+      { sym: 'B', name: 'Beta',  rank: 2, price: 50,  perNameSAR: 10000, targetShares: 200 },
+      { sym: 'C', name: 'Gamma', rank: 3, price: 20,  perNameSAR: 10000, targetShares: 500 },
+    ],
+  };
+  const bookOf = fills => computeBook(fills);
+
+  it('null when no snapshot', () => {
+    assert.equal(compareToSnapshot(null, bookOf([])), null);
+  });
+
+  it('full faithful execution → 100% coverage, status filled', () => {
+    const book = bookOf([
+      { sym: 'A', action: 'buy', shares: 100, price: 100 },
+      { sym: 'B', action: 'buy', shares: 200, price: 50 },
+      { sym: 'C', action: 'buy', shares: 500, price: 20 },
+    ]);
+    const r = compareToSnapshot(snap, book);
+    assert.equal(r.summary.coveragePct, 100);
+    assert.equal(r.summary.held, 3);
+    assert.equal(r.summary.missed, 0);
+    assert.equal(r.summary.offPlan, 0);
+    assert.equal(r.summary.avgEntrySlippagePct, 0);   // filled exactly at decision price
+    assert.ok(r.rows.every(x => x.status === 'filled'));
+  });
+
+  it('entry slippage = avg cost vs decision price (positive = paid up)', () => {
+    const book = bookOf([{ sym: 'A', action: 'buy', shares: 100, price: 105 }]); // +5% vs 100
+    const r = compareToSnapshot(snap, book);
+    const rowA = r.rows.find(x => x.sym === 'A');
+    assert.equal(rowA.slippagePct, 5);
+    assert.equal(r.summary.avgEntrySlippagePct, 5);
+  });
+
+  it('missed plan name → status missed, coverage drops', () => {
+    const book = bookOf([{ sym: 'A', action: 'buy', shares: 100, price: 100 }]);
+    const r = compareToSnapshot(snap, book);
+    assert.equal(r.summary.held, 1);
+    assert.equal(r.summary.missed, 2);
+    assert.equal(r.summary.coveragePct, 33.3);
+    assert.equal(r.rows.find(x => x.sym === 'B').status, 'missed');
+  });
+
+  it('under-size → partial', () => {
+    const book = bookOf([{ sym: 'A', action: 'buy', shares: 50, price: 100 }]); // 50 < 90% of 100
+    const r = compareToSnapshot(snap, book);
+    assert.equal(r.rows.find(x => x.sym === 'A').status, 'partial');
+    assert.equal(r.summary.partial, 1);
+  });
+
+  it('holding a name not in the plan → off_plan', () => {
+    const book = bookOf([
+      { sym: 'A', action: 'buy', shares: 100, price: 100 },
+      { sym: 'Z', action: 'buy', shares: 10,  price: 7 },
+    ]);
+    const r = compareToSnapshot(snap, book);
+    assert.equal(r.summary.offPlan, 1);
+    const z = r.rows.find(x => x.sym === 'Z');
+    assert.equal(z.status, 'off_plan');
+    assert.equal(z.rank, null);
+  });
+
+  it('intended vs actual basis tracks deployed capital', () => {
+    const book = bookOf([{ sym: 'A', action: 'buy', shares: 100, price: 100 }]);
+    const r = compareToSnapshot(snap, book);
+    assert.equal(r.summary.intendedBasis, 30000);   // 3 picks × 10000
+    assert.equal(r.summary.actualBasis, 10000);      // only A filled
+  });
+});
+
+describe('buildSnapshot — shape from a screen result', () => {
+  it('maps holdings to picks with target shares from perNameSAR', () => {
+    const screen = {
+      success: true, nextRebalance: '2026-07-01', asOf: '2026-06-30',
+      state: { status: 'decaying' }, sizing: { breakdown: { finalExposurePct: 48 } },
+      holdings: [{ sym: 'A', code: 'A', name: 'Alpha', rank: 1, price: 100 }],
+    };
+    const snap = buildSnapshot({ screen, account: 100000, perNameSAR: 10000 });
+    assert.equal(snap.period, '2026-07-01');
+    assert.equal(snap.exposurePct, 48);
+    assert.equal(snap.picks[0].targetShares, 100);   // floor(10000/100)
+    assert.equal(snap.picks[0].perNameSAR, 10000);
+  });
+  it('returns null for a failed screen', () => {
+    assert.equal(buildSnapshot({ screen: { success: false } }), null);
+  });
+});
+
+describe('decisionSnapshots store — round-trip', () => {
+  const P = '2099-01-01';
+  const clean = () => decisionSnapshots.remove(P);
+  before(clean);
+  after(clean);
+
+  it('saves and reads back by period and as latest', () => {
+    const snap = { period: P, asOf: '2098-12-31', picks: [{ sym: 'A', price: 1, rank: 1 }] };
+    const r = decisionSnapshots.save(snap);
+    assert.equal(r.ok, true);
+    assert.equal(decisionSnapshots.getByPeriod(P).picks.length, 1);
+    assert.equal(decisionSnapshots.getLatest().period, P);   // 2099 sorts last/newest
+  });
+
+  it('upserts on the same period (one plan per period)', () => {
+    decisionSnapshots.save({ period: P, picks: [{ sym: 'A' }] });
+    decisionSnapshots.save({ period: P, picks: [{ sym: 'A' }, { sym: 'B' }] });
+    assert.equal(decisionSnapshots.getByPeriod(P).picks.length, 2);
+  });
+
+  it('rejects a snapshot with no period', () => {
+    assert.ok(decisionSnapshots.save({ picks: [] }).error);
   });
 });
