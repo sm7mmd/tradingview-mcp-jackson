@@ -12,7 +12,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import CDP from "chrome-remote-interface";
 import { getRules, updateRules } from "../src/rules-engine.js";
-import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, accuracyLab } from "./db.js";
+import { scoreHistory as dbScoreHistory, positions as dbPositions, alertRules as dbAlertRules, virtualPortfolio as dbVirtual, insiderBuys as dbInsiderBuys, blockDeals as dbBlockDeals, cmaFilings as dbCMA, oppSignals as dbOppSignals, dbTracked, dbMilestones, goalsProfile, allocationPolicy, accuracyLab } from "./db.js";
+import { computeRebalance, SLEEVES, normalizeWeights } from "./allocation.mjs";
 import * as dataCore from "../src/core/data.js";
 import { runBacktest, sweepParams, simulatePortfolio, prepareIndicators, simulateTrades } from "./backtest.mjs";
 import { runScreener, getUniverseByMarket, TASI_STOCKS, US_EQUITY_STOCKS, ETF_STOCKS, CRYPTO_STOCKS, COMMODITY_STOCKS, INDEX_FOR_MARKET, emaArray, calcRsi, atrCalc, rsiSeries, macdHist, volumeCheck, scoreBias, findSRLevels, detectDivergence, computeSeasonality, toYahooSym, fetchYahooOHLCV } from "../scripts/tasi_screener.mjs";
@@ -2029,6 +2030,49 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       goalsProfile.save(body);
       return json(res, { ok: true, profile: goalsProfile.get() });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  // ── Multi-asset allocation policy ────────────────────────────────────────────
+  // Validated: 50/30/20 quarterly improved Sharpe 0.60→1.05, maxDD −19.5%→−13%,
+  // +1.0%/yr rebalance premium (~5y, 2020–2026). See
+  // docs/research/2026-06-22-multi-asset-allocation.md.
+  if (path === '/api/allocation' && method === 'GET') {
+    try {
+      const policy = allocationPolicy.get();
+      return json(res, {
+        policy,
+        sleeves: SLEEVES,
+        rebalance: computeRebalance({ values: policy.values, weights: policy.weights }),
+        validated: {
+          sharpe: '1.05 vs 0.60',
+          maxDD: '−13% vs −19.5%',
+          rebalancePremium: '+1.0%/yr',
+          window: '~5y, 2020–2026',
+        },
+      });
+    } catch(e) { return json(res, { error: e.message }, 500); }
+  }
+
+  if (path === '/api/allocation' && method === 'PUT') {
+    try {
+      const body = await readBody(req);
+      const patch = {};
+      if (body && body.weights !== undefined) patch.weights = normalizeWeights(body.weights);
+      if (body && body.values  !== undefined) patch.values  = body.values;
+      if (body && body.cadence !== undefined) patch.cadence = body.cadence;
+      const policy = allocationPolicy.set(patch);
+      return json(res, {
+        policy,
+        sleeves: SLEEVES,
+        rebalance: computeRebalance({ values: policy.values, weights: policy.weights }),
+        validated: {
+          sharpe: '1.05 vs 0.60',
+          maxDD: '−13% vs −19.5%',
+          rebalancePremium: '+1.0%/yr',
+          window: '~5y, 2020–2026',
+        },
+      });
     } catch(e) { return json(res, { error: e.message }, 500); }
   }
 

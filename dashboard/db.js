@@ -20,6 +20,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_WEIGHTS } from './allocation.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH   = join(__dirname, 'mawjah.db');
@@ -130,6 +131,11 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS goals_profile (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS allocation_policy (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
@@ -845,6 +851,48 @@ export const goalsProfile = {
     for (const [key, value] of Object.entries(updates)) {
       setGoalMeta(key, value);
     }
+  },
+};
+
+// ── Multi-asset allocation policy ─────────────────────────────────────────────
+// Mirrors goalsProfile: a key/value meta store backing a single policy object
+// { weights, values, cadence }. Default weights come from allocation.mjs.
+const DEFAULT_ALLOCATION = {
+  weights: { ...DEFAULT_WEIGHTS },
+  values: {},
+  cadence: 'quarterly',
+};
+
+function getAllocMeta(key) {
+  const row = db.prepare('SELECT value FROM allocation_policy WHERE key=?').get(key);
+  if (!row) return undefined;
+  try { return JSON.parse(row.value); } catch { return row.value; }
+}
+
+function setAllocMeta(key, value) {
+  db.prepare('INSERT OR REPLACE INTO allocation_policy (key, value) VALUES (?,?)').run(key, JSON.stringify(value));
+}
+
+export const allocationPolicy = {
+  get() {
+    const policy = {
+      weights: { ...DEFAULT_ALLOCATION.weights },
+      values: { ...DEFAULT_ALLOCATION.values },
+      cadence: DEFAULT_ALLOCATION.cadence,
+    };
+    for (const key of Object.keys(DEFAULT_ALLOCATION)) {
+      const v = getAllocMeta(key);
+      if (v !== undefined) policy[key] = v;
+    }
+    return policy;
+  },
+  // Shallow-merge a patch ({ weights?, values?, cadence? }) and persist each key.
+  set(patch = {}) {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      setAllocMeta(key, value);
+    }
+    return this.get();
   },
 };
 
