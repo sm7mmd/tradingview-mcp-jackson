@@ -135,7 +135,7 @@ async function main() {
 
   console.log(`\n${line}`);
   console.log(`  Picks are point-in-time. ⚠ = debt ≥50% (near AAOIFI line) — confirm per name.`);
-  console.log(`  Log fills in the Lab so next month shows real HOLD/SELL.`);
+  console.log(`  Log fills (npm run log-fill -- --buy …) so next month shows real HOLD/SELL.`);
   console.log(line + '\n');
   process.exit(0);
 }

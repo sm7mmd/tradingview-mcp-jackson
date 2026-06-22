@@ -21,6 +21,7 @@ import { quantileBreakpoints, assignQuintile, mean as peadMean } from '../dashbo
 import { classifyCounterparty, isContractHeadline } from '../dashboard/contract_flow.mjs';
 import { portfolioGuillotine, tstat as gTstat } from '../dashboard/guillotine.mjs';
 import { normalizeWeights, computeRebalance, DEFAULT_WEIGHTS } from '../dashboard/allocation.mjs';
+import { computeBook, summarize } from '../dashboard/fills.mjs';
 import { db } from '../dashboard/db.js';
 
 // ── scoreBias (pure) ────────────────────────────────────────────────────────
@@ -840,5 +841,125 @@ describe('allocation policy', () => {
     assert.equal(r.total, 0);
     assert.equal(r.sleeves.length, 3);
     assert.equal(pick(r.sleeves, 'gold').targetPct, 0.2);
+  });
+});
+
+// ── Fill ledger book math (pure) ────────────────────────────────────────────
+describe('computeBook — real fill ledger', () => {
+  it('single buy → open position at exact cost (no fees)', () => {
+    const b = computeBook([{ sym: 'X', action: 'buy', shares: 100, price: 10 }]);
+    assert.equal(b.open.length, 1);
+    assert.equal(b.open[0].shares, 100);
+    assert.equal(b.open[0].avgCost, 10);
+    assert.equal(b.open[0].costBasis, 1000);
+    assert.equal(b.realized, 0);
+  });
+
+  it('buy fees fold into cost basis → avgCost rises', () => {
+    const b = computeBook([{ sym: 'X', action: 'buy', shares: 100, price: 10, fees: 5 }]);
+    assert.equal(b.open[0].costBasis, 1005);
+    assert.equal(b.open[0].avgCost, 10.05);
+  });
+
+  it('two buys → weighted-average cost', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy', shares: 100, price: 10 },
+      { sym: 'X', action: 'buy', shares: 100, price: 20 },
+    ]);
+    assert.equal(b.open[0].shares, 200);
+    assert.equal(b.open[0].avgCost, 15);
+  });
+
+  it('partial sell → realized P&L on the sold lot, remainder stays open', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy',  shares: 100, price: 10 },
+      { sym: 'X', action: 'sell', shares: 40,  price: 15 },
+    ]);
+    // 40 * (15 - 10) = 200 realized
+    assert.equal(b.realized, 200);
+    assert.equal(b.open[0].shares, 60);
+    assert.equal(b.open[0].avgCost, 10);      // avg cost unchanged by a sell
+    assert.equal(b.open[0].costBasis, 600);
+  });
+
+  it('sell fees reduce proceeds', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy',  shares: 100, price: 10 },
+      { sym: 'X', action: 'sell', shares: 100, price: 15, fees: 10 },
+    ]);
+    // 100*15 - 10 fee - 100*10 cost = 1500 - 10 - 1000 = 490
+    assert.equal(b.realized, 490);
+    assert.equal(b.open.length, 0);            // fully closed
+  });
+
+  it('full sell closes the position (zeroed, not open)', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy',  shares: 100, price: 10 },
+      { sym: 'X', action: 'sell', shares: 100, price: 12 },
+    ]);
+    assert.equal(b.open.length, 0);
+    assert.equal(b.realized, 200);
+    assert.equal(b.positions.X.shares, 0);
+  });
+
+  it('oversell is clamped to held shares (no negative position)', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy',  shares: 100, price: 10 },
+      { sym: 'X', action: 'sell', shares: 999, price: 12 },
+    ]);
+    assert.equal(b.open.length, 0);
+    assert.equal(b.realized, 200);             // only the 100 held are sold
+    assert.equal(b.positions.X.shares, 0);
+  });
+
+  it('independent syms tracked separately', () => {
+    const b = computeBook([
+      { sym: 'A', action: 'buy', shares: 10, price: 5 },
+      { sym: 'B', action: 'buy', shares: 20, price: 3 },
+    ]);
+    assert.equal(b.open.length, 2);
+    assert.equal(b.realizedBySym.A ?? 0, 0);
+  });
+
+  it('empty ledger → flat book', () => {
+    const b = computeBook([]);
+    assert.equal(b.open.length, 0);
+    assert.equal(b.realized, 0);
+  });
+});
+
+describe('summarize — unrealized P&L', () => {
+  it('priced open position → unrealized vs avgCost', () => {
+    const b = computeBook([{ sym: 'X', action: 'buy', shares: 100, price: 10 }]);
+    const s = summarize(b, { X: 12 });
+    assert.equal(s.marketValue, 1200);
+    assert.equal(s.unrealized, 200);
+    assert.equal(s.totalPnl, 200);
+    assert.equal(s.priced, 1);
+    assert.equal(s.unpriced, 0);
+  });
+
+  it('unpriced names excluded from market value but counted', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy', shares: 100, price: 10 },
+      { sym: 'Y', action: 'buy', shares: 50,  price: 8 },
+    ]);
+    const s = summarize(b, { X: 11 });          // Y unpriced
+    assert.equal(s.priced, 1);
+    assert.equal(s.unpriced, 1);
+    assert.equal(s.marketValue, 1100);
+    assert.equal(s.unrealized, 100);            // only X contributes
+  });
+
+  it('realized flows through to totalPnl', () => {
+    const b = computeBook([
+      { sym: 'X', action: 'buy',  shares: 100, price: 10 },
+      { sym: 'X', action: 'sell', shares: 50,  price: 14 },
+    ]);
+    const s = summarize(b, { X: 12 });
+    // realized = 50*(14-10)=200 ; unrealized on 50 left = 50*(12-10)=100
+    assert.equal(s.realized, 200);
+    assert.equal(s.unrealized, 100);
+    assert.equal(s.totalPnl, 300);
   });
 });
