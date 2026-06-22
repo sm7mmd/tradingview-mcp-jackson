@@ -894,6 +894,135 @@ async function loadBlockDealSignal() {
   } catch(_) { el.innerHTML = ''; }
 }
 
+// ── Real Fill Ledger: your actual Derayah book — log fills, see HOLD/SELL + live P&L ──
+let fillData = null;
+
+async function loadFillLedger() {
+  const el = document.getElementById('fills-content');
+  if (!el) return;
+  if (!fillData) el.innerHTML = `<div class="lab-insight-card" style="border-color:var(--accent)"><div style="font-size:11px;color:var(--text3)">Loading fill ledger…</div></div>`;
+  try {
+    const d = await fetch('/api/fills').then(safeJson);
+    if (d.error) throw new Error(d.error);
+    fillData = d;
+    renderFillLedger();
+  } catch(e) {
+    el.innerHTML = `<div class="lab-insight-card"><div style="font-size:11px;color:var(--red)">Could not load fills: ${e.message}</div></div>`;
+  }
+}
+
+function renderFillLedger() {
+  const el = document.getElementById('fills-content');
+  if (!el || !fillData) return;
+  const { ledger = [], open = [], summary = {}, prices = {} } = fillData;
+  const sar = n => 'SAR ' + Math.round(+n || 0).toLocaleString('en-US');
+  const sign = n => ((+n) >= 0 ? '+' : '−') + Math.abs(Math.round(+n || 0)).toLocaleString('en-US');
+  const pcol = n => (+n) > 0 ? 'var(--green)' : (+n) < 0 ? 'var(--red)' : 'var(--text3)';
+  const code = s => (s || '').replace('TADAWUL:', '');
+
+  // Open book rows — avg cost vs latest scan price = unrealized P&L
+  const openRows = open.map(p => {
+    const px = prices[p.sym];
+    const upl = px != null ? p.shares * (px - p.avgCost) : null;
+    return `<tr>
+      <td style="font-size:11px;font-weight:600;color:var(--text)">${p.name && p.name !== p.sym ? p.name : ''} <span style="color:var(--text3);font-weight:400">${code(p.sym)}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${p.shares}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${p.avgCost}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text3)">${px != null ? px : '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;font-weight:700;color:${upl != null ? pcol(upl) : 'var(--text3)'}">${upl != null ? sign(upl) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Full ledger, newest first, each removable
+  const ledgerRows = [...ledger].reverse().map(f => `<tr>
+    <td style="font-size:10px;color:var(--text3)">${f.date}</td>
+    <td style="font-size:10px;font-weight:700;color:${f.action === 'buy' ? 'var(--green)' : 'var(--red)'}">${f.action.toUpperCase()}</td>
+    <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${f.shares}</td>
+    <td style="font-size:11px;color:var(--text)">${code(f.sym)}</td>
+    <td style="font-family:'JetBrains Mono',monospace;font-size:11px;text-align:end;color:var(--text2)">${f.price}</td>
+    <td style="font-family:'JetBrains Mono',monospace;font-size:10px;text-align:end;color:var(--text3)">${f.fees || 0}</td>
+    <td style="font-size:9px;color:var(--text3)">${f.note || ''}</td>
+    <td style="text-align:end"><button onclick="deleteFill(${f.id})" title="Remove this fill" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px">✕</button></td>
+  </tr>`).join('');
+
+  const unrealTxt = summary.priced
+    ? `<span style="color:${pcol(summary.unrealized)};font-weight:700">${sign(summary.unrealized)}</span> <span style="font-size:9px;color:var(--text3)">(${summary.priced} priced${summary.unpriced ? `, ${summary.unpriced} no price` : ''})</span>`
+    : `<span style="color:var(--text3)">— scan to price the book</span>`;
+
+  el.innerHTML = `
+<div class="lab-insight-card" style="border-color:var(--accent)">
+  <div style="display:flex;align-items:center;gap:8px;margin-block-end:4px;flex-wrap:wrap">
+    <span style="font-size:14px;font-weight:800;color:var(--text)">📒 Real Fill Ledger</span>
+    <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--accent);color:#fff">your actual book</span>
+  </div>
+  <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-block-end:12px" title="Log the trades you actually placed on Derayah. These become next month's HOLD/SELL in the decision, and your realized profit/loss builds a live track record.">
+    Log the fills you actually placed. They feed next month's HOLD/SELL and accrue a live profit/loss (P&amp;L) record.
+  </div>
+
+  <!-- P&L summary -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-block-end:14px">
+    <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:var(--text3)">Open positions</div><div style="font-size:15px;font-weight:700;color:var(--text)">${summary.openCount || 0}</div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:var(--text3)" title="Profit/loss already banked from closed sells.">Realized P&amp;L</div><div style="font-size:15px;font-weight:700;color:${pcol(summary.realized)}">${sign(summary.realized || 0)}</div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:var(--text3)" title="On-paper gain/loss of open positions at the latest scan price.">Unrealized P&amp;L</div><div style="font-size:15px;font-weight:700">${unrealTxt}</div></div>
+    <div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:9px;color:var(--text3)">Open cost basis</div><div style="font-size:15px;font-weight:700;color:var(--text2)">${sar(summary.costBasis)}</div></div>
+  </div>
+
+  <!-- Log a fill -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;align-items:end;margin-block-end:6px">
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px">Symbol</div><input class="goal-input goal-input-sm" id="fill-sym" placeholder="1120" style="width:100%"></div>
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px">Side</div><select class="goal-input goal-input-sm" id="fill-action" style="width:100%"><option value="buy">Buy</option><option value="sell">Sell</option></select></div>
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px">Shares</div><input class="goal-input goal-input-sm" id="fill-shares" type="number" min="0" step="1" style="width:100%"></div>
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px">Price</div><input class="goal-input goal-input-sm" id="fill-price" type="number" min="0" step="0.01" style="width:100%"></div>
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px" title="Broker commission for this fill (optional). Folds into cost on buys, reduces proceeds on sells.">Fees</div><input class="goal-input goal-input-sm" id="fill-fees" type="number" min="0" step="0.01" placeholder="0" style="width:100%"></div>
+    <div><div style="font-size:9px;color:var(--text3);margin-block-end:2px">Date</div><input class="goal-input goal-input-sm" id="fill-date" type="date" style="width:100%"></div>
+    <div><button class="btn btn-primary" style="font-size:11px;padding:6px 10px;width:100%" onclick="submitFill()">Log</button></div>
+  </div>
+  <div style="font-size:9px;color:var(--text3);margin-block-end:14px">4-digit codes auto-prefix to TADAWUL. Date defaults to today.</div>
+
+  ${open.length ? `
+  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-block-end:6px">Open book</div>
+  <div class="lab-table-wrap" style="margin-block-end:14px"><table class="lab-table">
+    <thead><tr><th>Name</th><th style="text-align:end">Shares</th><th style="text-align:end" title="Weighted-average buy price including fees.">Avg cost</th><th style="text-align:end" title="Latest scan price.">Last</th><th style="text-align:end">Unreal. P&amp;L</th></tr></thead>
+    <tbody>${openRows}</tbody></table></div>` : ''}
+
+  ${ledger.length ? `
+  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-block-end:6px">Fills (${ledger.length})</div>
+  <div class="lab-table-wrap"><table class="lab-table">
+    <thead><tr><th>Date</th><th>Side</th><th style="text-align:end">Shares</th><th>Sym</th><th style="text-align:end">Price</th><th style="text-align:end">Fees</th><th>Note</th><th></th></tr></thead>
+    <tbody>${ledgerRows}</tbody></table></div>`
+  : `<div style="font-size:11px;color:var(--text2);padding:8px 0">No fills logged yet. After you trade the monthly picks, log them here.</div>`}
+</div>`;
+}
+
+async function submitFill() {
+  const sym    = document.getElementById('fill-sym')?.value?.trim();
+  const action = document.getElementById('fill-action')?.value;
+  const shares = parseFloat(document.getElementById('fill-shares')?.value);
+  const price  = parseFloat(document.getElementById('fill-price')?.value);
+  const fees   = parseFloat(document.getElementById('fill-fees')?.value) || 0;
+  const date   = document.getElementById('fill-date')?.value || undefined;
+  if (!sym) return alert('Symbol required (e.g. 1120)');
+  if (!(shares > 0)) return alert('Shares must be greater than 0');
+  if (!(price > 0)) return alert('Price must be greater than 0');
+  try {
+    const r = await fetch('/api/fills', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sym, action, shares, price, fees, date }),
+    }).then(safeJson);
+    if (r.error) throw new Error(r.error);
+    await loadFillLedger();
+  } catch(e) { alert('Log failed: ' + e.message); }
+}
+
+async function deleteFill(id) {
+  if (!confirm('Remove this fill? The book and P&L recompute from the remaining fills.')) return;
+  try {
+    const r = await fetch(`/api/fills/${id}`, { method: 'DELETE' }).then(safeJson);
+    if (r.error) throw new Error(r.error);
+    await loadFillLedger();
+  } catch(e) { alert('Remove failed: ' + e.message); }
+}
+
 // ── True Edge: forward excess vs equal-weight TASI basket, net cost (the honest metric) ──
 // Strategy edge — graded per rebalance period (the honest unit for a portfolio strategy).
 async function loadLabStrategy() {

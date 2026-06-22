@@ -19,7 +19,7 @@ function switchTab(name,btn){
   // Lab tab
   if(name==='lab'){ loadLabPanel(); loadStrategyValidation(); }
   // Momentum Screen tab (+ block-deal signal)
-  if(name==='momentum'){ loadMomentumScreen(); loadPeadScreen(); loadBlockDealSignal(); }
+  if(name==='momentum'){ loadMomentumScreen(); loadPeadScreen(); loadBlockDealSignal(); loadFillLedger(); }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
